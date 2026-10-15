@@ -14,6 +14,9 @@ import type { AdFormat, AdLanguage, AspectRatio, BrandDna, LightDirection, Model
 
 /** Ambient props always allowed in a plate / scene (never product parts). */
 export const AMBIENT_PROPS = ['table', 'plants', 'fabric', 'light', 'wall texture'] as const
+/** Round 12: with a strict prop lock (MCP allowedProps) only the surface, the wall and the light are ambient — no plant, no blanket. */
+export const STRICT_AMBIENT = ['table / desk surface', 'light', 'wall texture'] as const
+export const ambientProps = (strict?: boolean): readonly string[] => (strict ? STRICT_AMBIENT : AMBIENT_PROPS)
 
 /** Normalized region of the plate (0–1, plate coordinates). */
 export interface PlateRegion {
@@ -104,6 +107,8 @@ export interface BuildPlatePromptInput {
   surface?: PlateSurface
   variation?: number
   allowedProps?: string[]
+  /** Round 12: only allowedProps + surface / wall / light (no plants, fabric, decor). */
+  strictProps?: boolean
   /** Scene brief from the copy (already stripped of on-image copy by the caller). */
   sceneBrief?: string
   /** Plate ratio (default 9:16, cover-fit to the pack ratios). */
@@ -141,7 +146,7 @@ function plateBrief(brief: string | undefined): string {
 
 export function buildPlatePrompt(input: BuildPlatePromptInput): string {
   const props = cleanProps(input.allowedProps)
-  const ambient = [...AMBIENT_PROPS, ...props]
+  const ambient = [...ambientProps(input.strictProps), ...props]
   const mood = plateBrief(input.sceneBrief)
   const attrs = cleanAttributes(input.immutableAttributes ?? input.offer.immutableAttributes)
   const overhead = input.view === 'overhead'
@@ -161,6 +166,7 @@ export function buildPlatePrompt(input: BuildPlatePromptInput): string {
     overhead ? 'Lighting: soft, even light from above; no strong directional shadows on the surface.' : `Lighting: ${lightPhrase(input.light)}; consistent shadows on the surface.`,
     'STRICT: the image must contain NO product, no devices, no electronics, no parts, no accessories, no cables, no remotes or controllers, no packaging or boxes, no bottles, no tools, no text and no logos. No people and no hands.',
     `Only these ambient props are allowed, sparingly and away from the placement area: ${ambient.join(', ')}.`,
+    input.strictProps ? 'NOTHING else: no plants, no flowers, no blankets, throws or fabric, no books, mugs, vases or decor objects.' : '',
     attrs.length
       ? `The real product is composited later from its photo and never changes (${attrs.join('; ')}): do not draw it, any part of it or anything resembling it; choose background tones that keep those attributes clearly visible.`
       : '',
@@ -231,8 +237,8 @@ export function partsLine(refs: PropsReference[]): string {
   return refs.map((r, i) => `Reference ${i + 2}: ${r.label ? `"${r.label.slice(0, 160)}"` : 'product'} (${r.role})`).join('; ')
 }
 
-export function buildPlateCheckPrompt(input: { refs: PropsReference[]; allowedProps?: string[]; placement?: PlateRegion; language: AdLanguage; immutableAttributes?: string[]; view?: PlateView }): { system: string; user: string } {
-  const allowed = [...AMBIENT_PROPS, ...cleanProps(input.allowedProps)]
+export function buildPlateCheckPrompt(input: { refs: PropsReference[]; allowedProps?: string[]; strictProps?: boolean; placement?: PlateRegion; language: AdLanguage; immutableAttributes?: string[]; view?: PlateView }): { system: string; user: string } {
+  const allowed = [...ambientProps(input.strictProps), ...cleanProps(input.allowedProps)]
   const attrs = cleanAttributes(input.immutableAttributes)
   return {
     system: [
@@ -261,6 +267,7 @@ export async function checkPlate(input: {
   plateImage: string
   refs: PropsReference[]
   allowedProps?: string[]
+  strictProps?: boolean
   placement?: PlateRegion
   language: AdLanguage
   model?: string
@@ -268,7 +275,7 @@ export async function checkPlate(input: {
   view?: PlateView
 }): Promise<PlateCheckResult> {
   const refs = input.refs.slice(0, 3)
-  const prompt = buildPlateCheckPrompt({ refs, allowedProps: input.allowedProps, placement: input.placement, language: input.language, immutableAttributes: input.immutableAttributes, ...(input.view ? { view: input.view } : {}) })
+  const prompt = buildPlateCheckPrompt({ refs, allowedProps: input.allowedProps, ...(input.strictProps ? { strictProps: true } : {}), placement: input.placement, language: input.language, immutableAttributes: input.immutableAttributes, ...(input.view ? { view: input.view } : {}) })
   const res = await input.gateway.visionJson<Record<string, unknown>>({ ...prompt, images: [input.plateImage, ...refs.map((r) => r.image)], model: input.model })
   const raw = (res.data ?? {}) as Record<string, unknown>
   const extraObjects = asObjectList(raw.extraObjects)

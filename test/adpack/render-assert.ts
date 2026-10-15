@@ -44,6 +44,8 @@ export const BULLETS_DRAWN: Record<AdFormat, number> = {
   explainer: 4,
 }
 
+const dropSeparators = (s: string) => s.replace(/\s*·\s*/g, ' ').replace(/\s+/g, ' ').trim()
+
 export function assertReport(report: LayoutReport, format: AdFormat, r: AspectRatio, copy = SAMPLE_COPY, language: 'es' | 'en' = 'es') {
   const { width, height } = RATIO_SIZE[r]
   expect(report.width).toBe(width)
@@ -57,7 +59,9 @@ export function assertReport(report: LayoutReport, format: AdFormat, r: AspectRa
   if (copy.subline) expect(byRole('subline').map((e) => e.text)).toEqual([copy.subline])
   else expect(byRole('subline')).toHaveLength(0)
   expect(byRole('cta').map((e) => e.text)).toEqual(copy.cta ? [copy.cta] : [])
-  expect(byRole('offer').map((e) => e.text)).toEqual(copy.offerLine ? [copy.offerLine] : [])
+  // Round-1 P6: a price sticker may carry the shipping part in a ribbon (a second offer block).
+  if (copy.offerLine) expect(byRole('offer').map((e) => e.text).join(' · ')).toBe(copy.offerLine)
+  else expect(byRole('offer')).toHaveLength(0)
   expect(byRole('bullet').map((e) => e.text).sort()).toEqual(copy.bullets.slice(0, BULLETS_DRAWN[format]).sort())
   const labels = byRole('label').map((e) => e.text)
   if (format === 'before_after') expect(labels).toEqual(language === 'en' ? ['Before', 'After'] : ['Antes', 'Después'])
@@ -67,7 +71,8 @@ export function assertReport(report: LayoutReport, format: AdFormat, r: AspectRa
 
   for (const e of report.elements) {
     expect(e.fits).toBe(true)
-    expect(e.lines.join(' ')).toBe(e.text)
+    // Lines are the exact text; an offer line may drop its " · " where a line breaks (round-1 P6).
+    expect(dropSeparators(e.lines.join(' '))).toBe(dropSeparators(e.text))
     expect(within(e.box, canvas)).toBe(true)
     expect(within(e.box, report.safeArea)).toBe(true)
     expect(e.contrast).toBeGreaterThanOrEqual(4.5)

@@ -1,0 +1,14 @@
+{
+ "A": {
+  "kept": "first",
+  "firstSeverity": 8,
+  "retrySeverity": 8,
+  "attempted": true
+ },
+ "B": {
+  "kept": "first",
+  "firstSeverity": 6,
+  "retrySeverity": 10,
+  "attempted": true
+ }
+}

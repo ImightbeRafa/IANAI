@@ -28,6 +28,11 @@ export interface ForegroundEstimate {
   threshold: number
   /** Lab of the image (interleaved), kept for color coverage. */
   lab: Float32Array
+  /**
+   * Round 1: pixels of accepted objects that look like a soft shadow on the surface (darker, same
+   * hue, low ΔE). A cut-out may drop them (shadow removal) without losing recall.
+   */
+  soft?: Uint8Array
 }
 
 export interface CutoutRecall {
@@ -180,8 +185,15 @@ export function estimateForeground(lab: Float32Array, w: number, h: number, hint
     comps.push(c)
   }
   const out = new Int32Array(n)
-  for (let i = 0; i < n; i++) if (keep.has(labels[i])) out[i] = labels[i]
-  return { w, h, labels: out, comps, threshold, lab }
+  const soft = new Uint8Array(n)
+  for (let i = 0; i < n; i++) {
+    if (!keep.has(labels[i])) continue
+    out[i] = labels[i]
+    const dLi = lab[i * 3] - model[i * 3]
+    const dCi = Math.hypot(lab[i * 3 + 1] - model[i * 3 + 1], lab[i * 3 + 2] - model[i * 3 + 2])
+    if (dLi < -1.5 && dLi > -25 && dCi < 3) soft[i] = 1
+  }
+  return { w, h, labels: out, comps, threshold, lab, soft }
 }
 
 /** Separated object components a flat lay shows (each ≥ 0.2% of the frame). */
@@ -236,6 +248,8 @@ export function cutoutRecall(est: ForegroundEstimate, mask: Uint8Array, opts: { 
     const bin = colorBin(est.lab[i * 3], est.lab[i * 3 + 1], est.lab[i * 3 + 2])
     if (mask[i]) histM[bin]++
     if (!s) continue
+    // A dropped soft shadow is not a missed piece of the product (round 1).
+    if (est.soft?.[i] && !near[i]) continue
     s.area++
     histE[bin]++
     if (near[i]) s.hit++

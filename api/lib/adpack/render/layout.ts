@@ -94,6 +94,8 @@ export interface Zone {
   tone?: 'dark' | 'light'
   /** Fade length as a fraction of the canvas height/width (default 0.16). */
   fade?: number
+  /** Preferred dark text colour when ink text is chosen (kept only when it reads ≥ 4.5:1). */
+  ink?: Rgb
 }
 
 export interface TemplateLayout {
@@ -102,6 +104,8 @@ export interface TemplateLayout {
   /** Area the product cut-out is fitted into (contain). */
   productBox?: Box
   productValign?: 'center' | 'bottom'
+  /** Studio bleed: clip the photo layer to this region (below/above a solid colour band). */
+  bleedClip?: Box
   logoBox?: Box
   /** Content fits its regions at this scale (no vertical overflow). */
   fits: boolean
@@ -129,6 +133,10 @@ export interface Ctx {
   placement?: string
   /** Areas (canvas px) text must never cover, e.g. the product in the scene. */
   avoid?: Box[]
+  /** Studio bleed: luminance (0–1) of the canvas the photo is bled into (dark canvases get light type). */
+  canvasLum?: number
+  /** Brand name (text wordmark stands in when there is no logo asset). */
+  brandName?: string
   /** Set when `frame.safe` is a free region around the product (not the whole safe area). */
   region?: { full: Box }
 }
@@ -172,6 +180,8 @@ export interface TextOpts {
   lh?: number
   balance?: boolean
   maxH?: number
+  /** Break "a · b" offer lines at the separators first (round-1 P6). */
+  segmentBreaks?: boolean
   color?: Rgb
   fill?: Rgb
   zone?: string
@@ -190,6 +200,7 @@ export function textNode(role: TextRole, str: string, o: TextOpts): TextNode {
     lineHeight: o.lh ?? 1.2,
     balance: o.balance ?? true,
     maxHeight: o.maxH,
+    ...(o.segmentBreaks ? { segmentBreaks: true } : {}),
   })
   const w = Math.min(o.maxW, fitted.width)
   const x = o.align === 'left' ? o.x : o.align === 'right' ? o.x + o.maxW - w : o.x + (o.maxW - w) / 2

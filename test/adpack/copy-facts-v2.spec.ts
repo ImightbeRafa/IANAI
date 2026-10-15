@@ -277,8 +277,10 @@ describe('mustAppear facts (P0 #5)', () => {
   const facts = [fact('price', '₡14.900'), fact('bundle', '2 kits por ₡29.800'), fact('shipping', 'Envío gratis llevando 2 kits o más')]
 
   it('the offer line keeps the free-shipping rule (two-line badge) instead of dropping it', () => {
-    expect(buildOfferLine(facts, 'es')).toBe('₡14.900 · 2 kits por ₡29.800')
-    expect(buildOfferLine(facts, 'es', { mustAppear: ['price', 'bundle', 'shipping'] })).toBe('₡14.900 · 2 kits por ₡29.800 · Envío gratis llevando 2 kits o más')
+    // Round-1 P6: next to a bundle the single price is labelled ("1 kit ₡14.900"); the required line
+    // compacts the bundle ("2 kits ₡29.800") so the free-shipping rule still fits verbatim.
+    expect(buildOfferLine(facts, 'es')).toBe('1 kit ₡14.900 · 2 kits por ₡29.800')
+    expect(buildOfferLine(facts, 'es', { mustAppear: ['price', 'bundle', 'shipping'] })).toBe('1 kit ₡14.900 · 2 kits ₡29.800 · Envío gratis llevando 2 kits o más')
     const plain = [fact('price', '₡14.900'), fact('shipping', 'Envíos a todo el país por Correos de la zona'), fact('custom:free_shipping_rule', 'Envío gratis desde 2 unidades')]
     expect(buildOfferLine(plain, 'es', { mustAppear: ['price', 'shipping'] })).toBe('₡14.900 · Envío gratis desde 2 unidades')
   })
@@ -287,7 +289,7 @@ describe('mustAppear facts (P0 #5)', () => {
     const { dna, offer } = await kitWorld({ ...KIT_PROFILE, verifiedClaims: undefined })
     const angle = angleFor(dna, offer)
     const ctx = buildCopyContext(dna, offer, angle, 'es')
-    expect(ctx.offerLine).toBe('₡14.900 · 2 kits por ₡29.800 · Envío gratis llevando 2 kits o más')
+    expect(ctx.offerLine).toBe('1 kit ₡14.900 · 2 kits ₡29.800 · Envío gratis llevando 2 kits o más')
     const copy = normalizeModelCopy({ headline: 'Tu avión vuela de verdad', bullets: [], cta: 'Escribinos', caption: 'Un avión de papel que vuela de verdad. Escribinos y pedí el tuyo.', sceneBrief: 'Park.' }, ctx, 'fallback')
     // Complete caption (P1 #11): buying facts, not-included, age, then the confirmed contact CTA replaces the generic one.
     expect(copy.caption).toBe('Un avión de papel que vuela de verdad. ₡14.900 · 2 kits por ₡29.800 · Envío gratis llevando 2 kits o más. Papel no incluido. 3 baterías AA no incluidas. Desde 8 años, con supervisión de un adulto. Escribinos al WhatsApp 7000-0000.')

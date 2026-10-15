@@ -3,6 +3,7 @@
  * jobId === approvalRequestId (one job per approval).
  */
 
+import { MCP_VERSION } from './server-info.js'
 import type { McpApprovalRecord, McpApprovalStore } from './approval.js'
 import { MCP_HOST_MAX_DURATION_SEC } from '../organic-carousel.js'
 
@@ -214,6 +215,7 @@ export function buildFailedJobResult(options: {
       jobId: options.approvalRequestId,
       approvalRequestId: options.approvalRequestId,
       toolName: options.toolName,
+      serverVersion: MCP_VERSION,
       chargedCredits: 0,
       usage: {
         quotedCredits: options.quotedCreditCost ?? null,
@@ -480,6 +482,7 @@ export function withChargedCredits<T extends Record<string, unknown>>(
 } {
   const base = {
     ...result,
+    serverVersion: MCP_VERSION,
     charged,
     chargedCredits: charged,
     usage: {

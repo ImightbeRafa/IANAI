@@ -411,7 +411,7 @@ export const MUST_APPEAR_FACT_KEYS: Record<MustAppearKey, FactKey[]> = {
   shipping: ['shipping', 'custom:free_shipping_rule'],
   age: ['custom:age'],
   not_included: ['custom:not_included'],
-  contact: ['custom:contact_cta'],
+  contact: ['custom:contact_cta', 'custom:whatsapp'],
   payment_methods: ['payment_methods'],
 }
 
@@ -438,9 +438,31 @@ export function mustAppearItems(confirmed: DnaFact[], groups: readonly MustAppea
         seen.add(sig)
         out.push({ group, fact, where: OFFER_LINE_GROUPS.has(group) ? 'line_or_caption' : 'caption' })
       }
+      // One contact line is enough: the composed CTA wins over the bare WhatsApp number.
+      if (group === 'contact' && out.some((o) => o.group === 'contact')) break
+    }
+    if (group === 'contact' && !out.some((o) => o.group === 'contact')) {
+      const fact = contactFallbackFact(confirmed)
+      if (fact && !seen.has(normalizeText(fact.value))) {
+        seen.add(normalizeText(fact.value))
+        out.push({ group, fact, where: 'caption' })
+      }
     }
   }
   return out
+}
+
+/** A confirmed line that names a reachable channel with its handle/number ("WhatsApp 7113-3720"). */
+const CONTACT_LINE_RE = /\b(?:whats\s?app|wa\.me|tel\.?|telefono|phone|llam\w*|escrib\w*)\b[^\n]{0,24}\d{4}[-\s]?\d{3,4}/
+
+/**
+ * Round-1 feedback P5: offers saved without `contact` (no custom:contact_cta) still carry the
+ * owner's channel in a confirmed claim ("WhatsApp 7113-3720") or a CTA ("Escribinos por DM").
+ * Prefer the line with a number, then the owner's CTA text.
+ */
+export function contactFallbackFact(confirmed: DnaFact[]): DnaFact | undefined {
+  const withNumber = confirmed.find((f) => (f.key === 'custom:allowed_claim' || f.key === 'custom:verified_claim' || f.key === 'custom:phone') && CONTACT_LINE_RE.test(normalizeText(f.value)))
+  return withNumber ?? confirmed.find((f) => f.key === 'custom:cta')
 }
 
 /** On-image text of a copy (where price/bundle/shipping may live instead of the caption). */

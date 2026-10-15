@@ -24,6 +24,12 @@ export interface FitSpec {
   balance?: boolean
   /** Optional max total block height. */
   maxHeight?: number
+  /**
+   * Round-1 P6: "a · b · c" offer lines break AT the separators first (each part starts its own
+   * line, the "·" disappears at the break); a part wraps inside itself only when it must. Falls
+   * back to normal wrapping when the parts do not fit.
+   */
+  segmentBreaks?: boolean
 }
 
 export interface FittedText {
@@ -42,6 +48,26 @@ export interface FittedText {
 /** Collapse whitespace; the result is exactly what gets drawn (lines joined by single spaces). */
 export function normalizeText(s: string | undefined | null): string {
   return (s ?? '').replace(/\s+/g, ' ').trim()
+}
+
+/** Separators that must never end a line ("₡14.900 ·" / "2 kits…"): they travel with the next word. */
+const SEPARATOR_TOKEN_RE = /^[·•|/–—-]$/
+
+/**
+ * Whitespace tokens for wrapping, with a lone separator glued to the word after it, so a break can
+ * fall before "·" but never right after it. Joining the tokens with single spaces gives the input back.
+ */
+export function wrapTokens(text: string): string[] {
+  const raw = text ? text.split(' ') : []
+  const out: string[] = []
+  for (let i = 0; i < raw.length; i++) {
+    const w = raw[i]
+    if (SEPARATOR_TOKEN_RE.test(w) && i + 1 < raw.length) {
+      out.push(`${w} ${raw[i + 1]}`)
+      i++
+    } else out.push(w)
+  }
+  return out
 }
 
 function wrapWords(words: string[], font: FontRef, size: number, maxWidth: number): string[] | null {
@@ -113,9 +139,14 @@ function build(text: string, lines: string[], spec: FitSpec, size: number, fits:
 }
 
 /** Largest font size (integer px) at which `text` fits the box. */
+/** A wrapped line never starts or ends with a dangling " · " separator (the break replaces it). */
+export function tidySeparators(lines: string[]): string[] {
+  return lines.map((l) => l.replace(/^\s*[·•]\s+/, '').replace(/\s+[·•]\s*$/, '').trim()).filter((l) => l.length > 0)
+}
+
 export function fitText(spec: FitSpec): FittedText {
   const text = normalizeText(spec.text)
-  const words = text ? text.split(' ') : []
+  const words = wrapTokens(text)
   if (!words.length) return build('', [], spec, spec.maxSize, true)
   const floor = Math.max(8, Math.round(spec.floorSize ?? spec.minSize * 0.6))
 
@@ -126,11 +157,29 @@ export function fitText(spec: FitSpec): FittedText {
       const height = Math.round(size * spec.lineHeight) * lines.length
       if (spec.maxHeight && height > spec.maxHeight) continue
       const finalLines = spec.balance ? balanceLines(words, spec.font, size, spec.maxWidth, lines) : lines
-      return build(text, finalLines, spec, size, true)
+      return build(text, tidySeparators(finalLines), spec, size, true)
     }
     return null
   }
 
+  if (spec.segmentBreaks && text.includes(' · ')) {
+    const segs = text.split(' · ').map((x) => x.trim()).filter(Boolean)
+    for (let size = Math.round(spec.maxSize); size >= spec.minSize; size -= Math.max(1, Math.round(size * 0.03))) {
+      const lines: string[] = []
+      let ok = true
+      for (const seg of segs) {
+        const wrapped = wrapWords(wrapTokens(seg), spec.font, size, spec.maxWidth)
+        if (!wrapped) {
+          ok = false
+          break
+        }
+        lines.push(...wrapped)
+      }
+      if (!ok || lines.length > spec.maxLines) continue
+      if (spec.maxHeight && Math.round(size * spec.lineHeight) * lines.length > spec.maxHeight) continue
+      return build(text, lines, spec, size, true)
+    }
+  }
   if (spec.preferLines && spec.preferLines < spec.maxLines) {
     const preferred = tryFit(spec.preferLines, Math.max(spec.minSize, spec.preferMinSize ?? spec.minSize))
     if (preferred) return preferred

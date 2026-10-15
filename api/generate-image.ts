@@ -44,10 +44,17 @@ import {
   GROK_IMAGE_PROVIDER_MODEL,
 } from './lib/grok-models.js'
 import { runGrokImageEdit } from './lib/grok-image-edit.js'
-import { resolveGrokImageApiMode } from './lib/grok-image-generate.js'
 import {
-  buildSlimGrokPostPrompt,
-  GROK_IMAGE_RETRY_PROMPT_BYTES,
+  buildWebGrokRequest,
+  buildWebPostSourcePrompt,
+  getAspectRatio,
+  normalizeWebCtaStrength,
+  postWebGrokWithClampRetry,
+  resolveWebGrokApi,
+  selectWebPostReferenceUrls,
+  toWebGrokAspectRatio,
+} from './lib/web-post-image.js'
+import {
   isGrokPromptLengthError,
   isShellMetaImagePrompt,
   prepareGrokImagePrompt,
@@ -465,19 +472,6 @@ function buildProductReferenceStrategyPrefix(
 }
 
 // Map width/height to aspect ratio string
-function getAspectRatio(width: number, height: number): string {
-  const ratio = width / height
-  if (Math.abs(ratio - 1) < 0.01) return '1:1'
-  if (Math.abs(ratio - 4/5) < 0.01) return '4:5'
-  if (Math.abs(ratio - 9/16) < 0.01) return '9:16'
-  if (Math.abs(ratio - 16/9) < 0.01) return '16:9'
-  if (Math.abs(ratio - 4/3) < 0.01) return '4:3'
-  if (Math.abs(ratio - 3/4) < 0.01) return '3:4'
-  if (Math.abs(ratio - 3/2) < 0.01) return '3:2'
-  if (Math.abs(ratio - 2/3) < 0.01) return '2:3'
-  return '1:1'
-}
-
 const GEMINI_IMAGE_ASPECTS = new Set(['1:1', '3:4', '4:5', '9:16', '16:9', '4:3', '3:2', '2:3'])
 
 function normalizeGeminiAspect(raw: unknown, fallback = '9:16'): string {
@@ -2877,21 +2871,13 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
         }
       }
       const grokProductReferenceCount = productRefUrls.length
-      const referenceUrls = selectGrokReferenceBudget(
-        [
-          ...productRefUrls.map((url) => ({ url, role: 'product' as const })),
-          ...(grokLogoDataUrl ? [{ url: grokLogoDataUrl, role: 'style' as const }] : []),
-          ...supportRefUrls.map((url) => ({ url, role: 'scene' as const })),
-        ],
-        3
-      ).map((row) => row.url)
+      const referenceUrls = selectWebPostReferenceUrls({
+        productUrls: productRefUrls,
+        logoDataUrl: grokLogoDataUrl,
+        supportUrls: supportRefUrls,
+      })
 
-      const grokCtaStrength = ((): string => {
-        const raw = (imageParams.ctaStrength as string | undefined) || 'sales'
-        return (['none', 'soft', 'brand_mention', 'sales'] as CTAStrength[]).includes(raw as CTAStrength)
-          ? raw
-          : 'sales'
-      })()
+      const grokCtaStrength = normalizeWebCtaStrength(imageParams.ctaStrength)
 
       // Venta-directa / anuncio presets are ~26KB essays — do not truncate those for Grok.
       // Build a slim useful prompt (user copy + short fidelity) then byte-cap with margin.
@@ -2905,7 +2891,7 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
         ? userPrompt
         : ''
       const grokSourcePrompt = useSlimPostPrompt
-        ? buildSlimGrokPostPrompt({
+        ? buildWebPostSourcePrompt({
           language: typeof imageParams.language === 'string' ? imageParams.language : 'es',
           postStyle: typeof imageParams.postStyle === 'string' ? imageParams.postStyle : 'venta-directa',
           productSubStyle: typeof imageParams.productSubStyle === 'string' ? imageParams.productSubStyle : null,
@@ -2921,14 +2907,10 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
           hasSceneRef: grokRefCandidates.some((row) => row.role === 'scene'),
           productSilhouette: postProductSilhouette,
           lockedOfferPrice: postLockedOfferPrice,
-          logoStampRules: buildLogoStampRules(postLangCode, Boolean(grokLogoDataUrl), { bloomSku }),
-          ctaGuardrails: buildPostCtaGuardrails(postLangCode, grokCtaStrength),
+          bloomSku,
           hasBrandLogo: Boolean(grokLogoDataUrl),
-          category: postProductCreativeRow?.product_category_custom
-            || postProductCreativeRow?.product_category
-            || null,
-          offerName: postProductCreativeRow?.name || null,
-          scriptContext: grokUserCopy,
+          ctaStrength: grokCtaStrength,
+          productRow: postProductCreativeRow,
         })
         : enhancedPrompt
 
@@ -2938,7 +2920,7 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
       let preparedGrokPrompt = prepareGrokImagePrompt(grokSourcePrompt, {
         preferTail: preferTailForGrok,
       })
-      let grokPrompt = preparedGrokPrompt.prompt
+      const grokPrompt = preparedGrokPrompt.prompt
 
       console.log('Submitting to Grok Imagine 2.0 API:', {
         prompt: grokPrompt.substring(0, 100) + '...',
@@ -2955,77 +2937,37 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
       })
 
       try {
-        // Grok Imagine 2.0 ratios (plus common social fallbacks)
-        const GROK_SUPPORTED_RATIOS = [
-          '1:1', '16:9', '9:16', '4:3', '3:4', '3:2', '2:3', '2:1', '1:2',
-          '19.5:9', '9:19.5', '20:9', '9:20', 'auto',
-        ]
-        const GROK_RATIO_FALLBACK: Record<string, string> = { '4:5': '3:4', '5:4': '4:3' }
-        let grokAspectRatio = getAspectRatio(
+        const grokAspectRatio = toWebGrokAspectRatio(getAspectRatio(
           imageParams.width || 1080,
           imageParams.height || 1080
-        )
-        if (!GROK_SUPPORTED_RATIOS.includes(grokAspectRatio)) {
-          grokAspectRatio = GROK_RATIO_FALLBACK[grokAspectRatio] || '1:1'
-        }
+        ))
 
-        const grokApi = resolveGrokImageApiMode({
-          action: 'generate',
-          productReferenceCount: grokProductReferenceCount,
-          referenceCount: referenceUrls.length,
+        const grokApi = resolveWebGrokApi(grokProductReferenceCount, referenceUrls.length)
+        const buildGrokRequest = (prompt: string): Record<string, unknown> => buildWebGrokRequest({
+          prompt,
+          aspectRatio: grokAspectRatio,
+          referenceUrls,
+          logoDataUrl: grokLogoDataUrl,
+          api: grokApi,
         })
-        const buildGrokRequest = (prompt: string): Record<string, unknown> => {
-          const grokRequest: Record<string, unknown> = {
-            model: providerModel,
-            prompt,
-            n: 1,
-            response_format: 'b64_json',
-            aspect_ratio: grokAspectRatio,
-            resolution: GROK_IMAGE_DEFAULT_RESOLUTION,
-            quality: GROK_IMAGE_DEFAULT_QUALITY,
-          }
-          // Product refs → /edits product_lock_scene (pixel-faithful SKU + scene replace).
-          // No product refs → /generations compose (silhouette / typography + scene recipe).
-          // Never attach logo as the only edit base when product photos exist.
-          if (referenceUrls.length === 1) {
-            grokRequest.image = { url: referenceUrls[0], type: 'image_url' }
-          } else if (referenceUrls.length > 1) {
-            grokRequest.images = referenceUrls.map((url) => ({ url, type: 'image_url' }))
-          } else if (grokLogoDataUrl && grokApi.mode === 'compose') {
-            grokRequest.image = { url: grokLogoDataUrl, type: 'image_url' }
-          }
-          return grokRequest
-        }
-
-        const endpoint = grokApi.endpoint
-        const postGrok = async (prompt: string) => {
-          const response = await fetch(endpoint, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'Authorization': `Bearer ${xaiApiKey}`
-            },
-            body: JSON.stringify(buildGrokRequest(prompt))
-          })
-          const errorText = response.ok ? '' : await response.text()
-          return { response, errorText }
-        }
-
-        let { response, errorText } = await postGrok(grokPrompt)
 
         // If Grok still rejects length after SAFE clamp, auto-retry harder — never ask user to shorten.
-        if (!response.ok && isGrokPromptLengthError(errorText)) {
-          preparedGrokPrompt = prepareGrokImagePrompt(grokSourcePrompt, {
-            preferTail: preferTailForGrok,
-            maxBytes: GROK_IMAGE_RETRY_PROMPT_BYTES,
-          })
-          grokPrompt = preparedGrokPrompt.prompt
-          console.warn('Grok prompt-too-long; retrying with aggressive clamp:', {
-            preparedByteLength: preparedGrokPrompt.preparedByteLength,
-            referenceCount: referenceUrls.length,
-          })
-          ;({ response, errorText } = await postGrok(grokPrompt))
-        }
+        const grokPosted = await postWebGrokWithClampRetry({
+          endpoint: grokApi.endpoint,
+          apiKey: xaiApiKey,
+          sourcePrompt: grokSourcePrompt,
+          preferTail: preferTailForGrok,
+          buildRequest: buildGrokRequest,
+          prepared: preparedGrokPrompt,
+          onRetry: (retryPrepared) => {
+            console.warn('Grok prompt-too-long; retrying with aggressive clamp:', {
+              preparedByteLength: retryPrepared.preparedByteLength,
+              referenceCount: referenceUrls.length,
+            })
+          },
+        })
+        const { response, errorText } = grokPosted
+        preparedGrokPrompt = grokPosted.prepared
 
         if (!response.ok) {
           console.error('Grok Imagine API error:', errorText)

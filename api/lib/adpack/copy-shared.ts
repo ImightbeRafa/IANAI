@@ -6,6 +6,7 @@ import type { AdAngle, AdCopy, AdLanguage, BrandDna, CopyClaim, DnaFact, FactKey
 import { applyCitations, captionWithRequiredFacts, factIdList, missingMustAppear, mustAppearItems, parseClaims, type IdFact, type MustAppearItem } from './claims.js'
 import { buildOfferLine, confirmedFacts, extractNumericClaims, mergeFacts, numbersInFacts, unconfirmedFacts } from './facts.js'
 import { COPY_LIMITS, FORMAT_PATTERNS } from './patterns.js'
+import { quarantineBannedFacts } from './compliance.js'
 import { cleanString, escapeRegExp, normalizeText } from './util.js'
 
 /**
@@ -32,7 +33,9 @@ export interface CopyContext {
 }
 
 export function buildCopyContext(dna: BrandDna, offer: OfferInput, angle: AdAngle, language: AdLanguage): CopyContext {
-  const facts = mergeFacts(dna, offer)
+  // Banned claims saved as confirmed facts (e.g. health claims on a wellness offer) are never the
+  // writer's allowlist: quarantined to unconfirmed, so repeating them fails the copy check.
+  const facts = quarantineBannedFacts(mergeFacts(dna, offer), dna.category, language).facts
   const confirmed = confirmedFacts(facts)
   return {
     dna,
@@ -266,8 +269,41 @@ export function normalizeModelCopy(raw: RawModelCopy | null | undefined, ctx: Co
  */
 export function ensureRequiredFacts(copy: AdCopy, ctx: CopyContext): AdCopy {
   if (!ctx.mustAppear.length) return copy
+  ensureNotIncludedChip(copy, ctx)
   const missing = missingMustAppear(copy, ctx.mustAppear, { captionOnly: true })
   if (missing.length) copy.caption = captionWithRequiredFacts(copy.caption ?? '', missing, COPY_LIMITS.captionMaxChars, truncateAtBoundary)
+  return copy
+}
+
+const NOT_INCLUDED_RE = /\bno incluid[oa]s?\b|\bno incluye\b|\bnot included\b|\bdoes not include\b|\bsold separately\b/
+
+/** "3 pilas AA para el control no incluidas" → "pilas"; "Papel no incluido (hoja A4 o carta)" → "papel". */
+export function notIncludedHead(value: string): string {
+  let v = value.replace(/\([^)]*\)/g, ' ').replace(/\b(?:no incluid[oa]s?|no incluye|no viene(?:n)? incluid[oa]s?|not included|does not include)\b/gi, ' ')
+  v = v.split(/\s(?:para|de|del|o|con|for|of|or|with)\s|[,;:]/i)[0]
+  const words = v.replace(/\s+/g, ' ').trim().split(' ').filter((w) => w && !/^\d+$/.test(w))
+  const head = words[0] ?? ''
+  return /^[A-Z0-9]{2,}$/.test(head) ? head : head.toLowerCase()
+}
+
+/**
+ * Round-1 P5: the offer graphic is where a gift buyer decides, so the not-included items ride on
+ * the image as a chip ("No incluye papel ni pilas"), built from the confirmed not-included facts
+ * (never model-written). Replaces the last chip when the format's chip slots are full. Mutates `copy`.
+ */
+export function ensureNotIncludedChip(copy: AdCopy, ctx: CopyContext): AdCopy {
+  if (ctx.angle.format !== 'offer_graphic' || !ctx.mustAppear.some((m) => m.group === 'not_included')) return copy
+  const onImage = normalizeText([copy.headline, copy.subline ?? '', ...copy.bullets, copy.offerLine ?? ''].join(' \n '))
+  if (NOT_INCLUDED_RE.test(onImage)) return copy
+  const heads = [...new Set(ctx.mustAppear.filter((m) => m.group === 'not_included').map((m) => notIncludedHead(m.fact.value)).filter((h) => h.length >= 3))]
+  if (!heads.length) return copy
+  const es = ctx.language !== 'en'
+  const list = heads.length === 1 ? heads[0] : `${heads.slice(0, -1).join(', ')} ${es ? 'ni' : 'or'} ${heads[heads.length - 1]}`
+  const chip = es ? `No incluye ${list}` : `Not included: ${list}`
+  if (chip.length > COPY_LIMITS.bulletChars) return copy
+  const max = FORMAT_PATTERNS.offer_graphic.bullets[1]
+  if (copy.bullets.length >= max) copy.bullets = [...copy.bullets.slice(0, max - 1), chip]
+  else copy.bullets = [...copy.bullets, chip]
   return copy
 }
 

@@ -389,6 +389,7 @@ const ISSUE_LABELS: Record<CopyCheckIssue['code'], { es: string; en: string }> =
   urgency: { es: 'Mete presión o urgencia que la marca no usa', en: 'Uses urgency the brand does not allow' },
   grammar: { es: 'Le falta un artículo (texto telegráfico)', en: 'Telegraphic text (missing article)' },
   unverified_comparison: { es: 'Comparación sin dato verificado', en: 'Comparison without a verified fact' },
+  ambiguous_claim: { es: 'Frase recortada de un dato confirmado (falta a qué se refiere)', en: 'Shortened confirmed claim (missing what it refers to)' },
 }
 
 const FIELD_LABELS: Record<string, { es: string; en: string }> = {

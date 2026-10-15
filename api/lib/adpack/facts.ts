@@ -129,6 +129,31 @@ export const OFFER_BADGE_TARGET_CHARS = 40
 
 const FREE_SHIPPING_RE = /\b(?:gratis|gratuit[oa]s?|free)\b/
 
+/** "kits" → "kit", "unidades" → "unidad", "packs" → "pack", "units" → "unit". */
+function singularUnit(word: string): string {
+  const w = word.trim()
+  if (/[dlnr]es$/i.test(w) && w.length > 4) return w.slice(0, -2)
+  if (/s$/i.test(w) && w.length > 2) return w.slice(0, -1)
+  return w
+}
+
+/**
+ * Round-1 feedback P6: next to a bundle ("2 kits por ₡29.800") a bare "₡14.900" is ambiguous, so the
+ * single price is labelled with the bundle's own unit: "1 kit ₡14.900". Pure; returns the price
+ * unchanged when there is no countable bundle or the price already carries a label.
+ */
+export function labelledUnitPrice(price: string, bundle: string | undefined): string {
+  if (!bundle || /\p{L}/u.test(price.replace(/\b(?:CRC|USD|MXN|COP|EUR|GTQ|US)\b/g, ''))) return price
+  const m = bundle.trim().match(/^(\d+)\s+(\p{L}{2,})\s+(?:por|for|x|a)\b/iu)
+  if (!m || Number(m[1]) < 2) return price
+  return `1 ${singularUnit(m[2]).toLowerCase()} ${price}`
+}
+
+/** "2 kits por ₡29.800" → "2 kits ₡29.800" (badge-compact form; the numbers and unit stay). */
+function compactBundle(bundle: string): string {
+  return bundle.replace(/^(\d+\s+\p{L}+)\s+(?:por|for)\s+/iu, '$1 ')
+}
+
 /**
  * Exact offer/price line from confirmed facts only, e.g. "₡9.900 · Antes ₡12.900 · Envío gratis GAM".
  * Returns undefined when there is no confirmed price and no confirmed bundle.
@@ -145,9 +170,10 @@ export function buildOfferLine(facts: DnaFact[], language: AdLanguage, opts: { m
   const freeShipping = Boolean(shipping && FREE_SHIPPING_RE.test(normalizeText(shipping)))
   const KEEP = 99
   const parts: Array<{ text: string; drop: number }> = []
-  if (price) parts.push({ text: price, drop: KEEP })
+  const hasBundle = Boolean(bundle && normalizeText(bundle) !== normalizeText(price ?? ''))
+  if (price) parts.push({ text: hasBundle ? labelledUnitPrice(price, bundle) : price, drop: KEEP })
   if (compare && price) parts.push({ text: `${language === 'es' ? 'Antes' : 'Was'} ${compare}`, drop: 2 })
-  if (bundle && normalizeText(bundle) !== normalizeText(price ?? '')) parts.push({ text: bundle, drop: price ? 4 : KEEP })
+  if (bundle && hasBundle) parts.push({ text: bundle, drop: price ? 4 : KEEP })
   // Short free shipping sells; long logistics text does not fit a badge.
   if (shipping) parts.push({ text: shipping, drop: freeShipping && shipping.length <= 24 ? 3 : 1 })
   const join = () => parts.map((p) => p.text).join(' · ')
@@ -156,6 +182,8 @@ export function buildOfferLine(facts: DnaFact[], language: AdLanguage, opts: { m
     if (victim.drop >= KEEP) break
     parts.splice(parts.indexOf(victim), 1)
   }
+  // Without the bundle the label is noise: back to the bare price.
+  if (price && parts[0]?.text !== price && !parts.some((p) => p.text === bundle)) parts[0].text = price
   const line = join()
   return line.length > OFFER_LINE_MAX_CHARS ? parts[0].text.slice(0, OFFER_LINE_MAX_CHARS) : line
 }
@@ -174,17 +202,24 @@ function buildRequiredOfferLine(facts: DnaFact[], language: AdLanguage, must: Se
   const freeRule = shipIsFree ? shipping : getConfirmed(facts, 'custom:free_shipping_rule')?.value.trim()
   const KEEP = 99
   const parts: Array<{ text: string; drop: number }> = []
-  if (price) parts.push({ text: price, drop: KEEP })
+  const hasBundle = Boolean(bundle && normalizeText(bundle) !== normalizeText(price ?? ''))
+  if (price) parts.push({ text: hasBundle ? labelledUnitPrice(price, bundle) : price, drop: KEEP })
   if (compare && price) parts.push({ text: `${language === 'es' ? 'Antes' : 'Was'} ${compare}`, drop: must.has('compare_at_price') ? 5 : 2 })
-  if (bundle && normalizeText(bundle) !== normalizeText(price ?? '')) parts.push({ text: bundle, drop: price ? (must.has('bundle') ? 6 : 4) : KEEP })
+  const bundlePart = bundle && hasBundle ? { text: bundle, drop: price ? (must.has('bundle') ? 6 : 4) : KEEP } : null
+  if (bundlePart) parts.push(bundlePart)
+  // The free-shipping rule is shown verbatim (never paraphrased: "llevando 2 kits o más" ≠ "en 2 kits").
   if (freeRule) parts.push({ text: freeRule, drop: must.has('shipping') ? 8 : 3 })
   if (shipping && !shipIsFree && shipping.length <= 24) parts.push({ text: shipping, drop: 1 })
   const join = () => parts.map((p) => p.text).join(' · ')
+  // Labelled price + bundle + rule a few chars over budget: compact the bundle ("2 kits ₡29.800")
+  // before dropping a required part.
+  if (join().length > OFFER_LINE_MAX_CHARS && bundlePart && price) bundlePart.text = compactBundle(bundlePart.text)
   while (join().length > OFFER_LINE_MAX_CHARS && parts.length > 1) {
     const victim = parts.reduce((min, p) => (p.drop < min.drop ? p : min))
     if (victim.drop >= KEEP) break
     parts.splice(parts.indexOf(victim), 1)
   }
+  if (price && bundlePart && !parts.includes(bundlePart)) parts[0].text = price
   const line = join()
   return line.length > OFFER_LINE_MAX_CHARS ? parts[0].text.slice(0, OFFER_LINE_MAX_CHARS) : line
 }

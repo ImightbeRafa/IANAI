@@ -64,7 +64,11 @@ describe('buildStatusExtras', () => {
       item(8, { status: 'copy_ready' }),
       item(9, { status: 'planned' }),
     ]
+    // Polled the moment the pending items entered their step (round-1 P7 counts elapsed step time).
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date('2026-10-08T00:00:00.000Z'))
     const x = buildStatusExtras({ packId: PACK, status: 'running', items, moreWork: true, language: 'es' })
+    vi.useRealTimers()
     // copy_ready: 20+4+2+0 = 26 s; planned: 30 s → 56 s over 2 lanes = 28 s → 30 s.
     expect(x.etaSeconds).toBe(30)
     expect(x.summary).toBe('7/10 listos · 1 falló (producto no coincidía) · ~30 s restantes')
@@ -129,7 +133,7 @@ describe('buildStatusExtras', () => {
   })
 
   it('ETA uses defaults before any ad finished and is 0 when nothing is pending', () => {
-    expect(estimateRemainingSeconds([item(0)])).toBeGreaterThanOrEqual(40)
+    expect(estimateRemainingSeconds([item(0)], Date.parse('2026-10-08T00:00:00.000Z'))).toBeGreaterThanOrEqual(40)
     expect(estimateRemainingSeconds([doneItem(0)])).toBe(0)
     expect(failureReason(undefined, 'en')).toBe('unexpected error')
   })

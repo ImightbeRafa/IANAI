@@ -10,6 +10,7 @@
  * into re_price, shipping text into shipping_info) and the response says what
  * is pending; image tools fail with MIGRATION_PENDING. Nothing crashes.
  */
+import { clipWithNotice, ROLE_DB_MAX } from './text-limits.js'
 import { MigrationPendingError, isMissingColumnError, MIGRATION_085 } from '../db-missing-column.js'
 import { isPlaceholderValue, type IgnoredPlaceholder } from '../placeholder-guard.js'
 import { PRODUCT_IMAGE_TAGS, type ProductImageTag } from '../product-image-order.js'
@@ -192,6 +193,9 @@ export function offerView(row: Row, adProfile?: OfferAdProfile | null): Row {
     confirmedFacts: facts.map((f) => ({ key: f.key, value: f.value })),
     /** Fact groups every ad must carry (offer setting, else the defaults). */
     mustAppear: profile?.mustAppear ?? [...DEFAULT_MUST_APPEAR],
+    /** Round-1 P7: with a verified-claims bank only traceable claims ship (unverified claims block the ad). */
+    strictClaims: (profile?.verifiedClaims?.length ?? 0) > 0,
+    verifiedClaims: profile?.verifiedClaims?.length ?? 0,
   }
 }
 
@@ -345,7 +349,8 @@ export async function mcpTagProductImage(options: { store: McpOfferStore; user: 
   if ('role' in options.args) {
     const role = options.args.role
     if (role !== null && (typeof role !== 'string' || role.trim().length > 160)) throw new OfferInputError(`role (part name) must be a string of at most 160 characters, or null${typeof role === 'string' ? ` (got ${role.trim().length})` : ''}`)
-    patch.role = typeof role === 'string' && role.trim() && !isPlaceholderValue(role) ? role.trim() : null
+    // Round 11: ≤ 160 accepted; the DB column is ≤ 60 (product_images_role_len) → shortened visibly for the column
+    patch.role = typeof role === 'string' && role.trim() && !isPlaceholderValue(role) ? clipWithNotice('role', role.trim(), ROLE_DB_MAX, []) : null
   }
   if ('label' in options.args) {
     // #18: rename a photo (e.g. replace "MCP upload — IMG_2041.jpg").

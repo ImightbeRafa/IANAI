@@ -47,3 +47,4 @@ supabase/config.toml
 
 # Local agent worktrees
 .claude/worktrees/
+.build-commit

@@ -4,6 +4,7 @@
  * The runner never imports the renderer, storage or credits directly so tests
  * and the benchmark inject fakes, and the web / MCP doors inject real ones.
  */
+import type { QaLayoutReport } from './qa-gate.js'
 import type { AdCopy, AdFormat, AdLanguage, AspectRatio, DnaVisual, LayoutFamily, LightDirection, PlateSurface, FontsUsed } from './types.js'
 
 /** Placement of a real-product cut-out in a render (canvas px). */
@@ -48,6 +49,10 @@ export interface RenderInput {
    * Copy is never drawn over the product box in either mode.
    */
   productBox?: { x: number; y: number; w: number; h: number }
+  /** Round 1b studio bleed layer (exact mode; see fidelity/bleed.ts). */
+  /** Brand name for the text-wordmark fallback (no logo asset). */
+  brandName?: string
+  studioBleed?: { layer: Uint8Array | string; productBox: { x: number; y: number; w: number; h: number }; backdrop: { r: number; g: number; b: number }; edgesTouched?: string[]; preScale?: number }
 }
 
 export interface RenderOutput {
@@ -67,6 +72,8 @@ export interface RenderOutput {
   placement?: string
   /** #9: fonts actually drawn (+ fallbacks). */
   fontsUsed?: FontsUsed
+  /** Round 1b: layout facts the QA gate reads (text boxes, lines, contrast, logo, product box). */
+  qaReport?: QaLayoutReport
 }
 
 /** Deterministic text layer (Satori → resvg). Real impl: `./render` (see render-adapter.ts). */

@@ -8,6 +8,9 @@
  *   (plate → props check → composite + deterministic relight stage → optional AI relight →
  *   fidelity), used by MCP execute_image_generate, bulk posts and the campaign pack image step.
  */
+import { readCutoutMeta, writeCutoutMeta } from './cutout-meta.js'
+import { measureHalo, type HaloReport } from './halo.js'
+import type { Box } from '../render/types.js'
 import sharp from 'sharp'
 import { isSupportedImageRatio, RATIO_OUTPUT_SIZE, ratioValue, reframeToRatio } from '../../image-ratios.js'
 import { loadImageBytes } from '../render/image.js'
@@ -54,9 +57,19 @@ async function sourceBytes(url: string, ctx: CutoutContext): Promise<Uint8Array>
   return bytes
 }
 
+/**
+ * Cut-out cache generation. Bumped whenever segmentation changes what a cut-out contains, so cut-outs
+ * cached in storage by an older segmenter (round 1: Prototipo plane with backdrop halo baked in) are
+ * never reused. Storage key = `<sha256>-<version>`; `sourceHash` stays the plain photo hash.
+ */
+/** Round 11: cut-out vs reference-photo silhouette below this → warning. */
+export const PHOTO_IOU_WARN = 0.9
+export const CUTOUT_CACHE_VERSION = 'seg4'
+export const cutoutCacheKey = (hash: string) => `${hash}-${CUTOUT_CACHE_VERSION}`
+
 /** In-process LRU of cut-outs / photo quality by source hash (warm instances skip re-segmentation). */
 const MEMO_MAX = 24
-const cutoutMemo = new Map<string, { png: Uint8Array; width: number; height: number; method: CutoutMethod; recall?: number; flatLay?: boolean }>()
+const cutoutMemo = new Map<string, { png: Uint8Array; width: number; height: number; method: CutoutMethod; recall?: number; flatLay?: boolean; backgroundLeak?: number; photoIoU?: number; maskRepaired?: boolean }>()
 const qualityMemo = new Map<string, AssetQuality>()
 function remember<V>(map: Map<string, V>, key: string, value: V): void {
   if (map.size >= MEMO_MAX) map.delete(map.keys().next().value as string)
@@ -84,7 +97,7 @@ export async function cutoutForPhoto(photo: ProductPhoto, ctx: CutoutContext, op
       if (target) {
         const key = `${hash}-sr${target.width}x${target.height}`
         const from = { width: meta.width ?? 0, height: meta.height ?? 0 }
-        const hit = cutoutMemo.has(key) || (ctx.cache ? await ctx.cache.get(key).catch(() => null) : null)
+        const hit = cutoutMemo.has(cutoutCacheKey(key)) || (ctx.cache ? await ctx.cache.get(cutoutCacheKey(key)).catch(() => null) : null)
         if (hit) {
           const res = await cutoutFromBytes(photo, bytes, key, ctx)
           return 'error' in res ? res : { ...res, upscale: { from, to: { width: target.width, height: target.height } } }
@@ -113,7 +126,7 @@ async function cutoutIsFlatLay(png: Uint8Array, role: ProductPhoto['role']): Pro
   }
 }
 
-function storedCutout(photo: ProductPhoto, url: string, method: StoredCutout['method'], hash: string, extra: { recall?: number; flatLay?: boolean }): StoredCutout {
+function storedCutout(photo: ProductPhoto, url: string, method: StoredCutout['method'], hash: string, extra: { recall?: number; flatLay?: boolean; backgroundLeak?: number; photoIoU?: number; maskRepaired?: boolean }): StoredCutout {
   return {
     url,
     role: photo.role,
@@ -124,23 +137,28 @@ function storedCutout(photo: ProductPhoto, url: string, method: StoredCutout['me
     ...(photo.id ? { productImageId: photo.id } : {}),
     ...(typeof extra.recall === 'number' ? { recall: extra.recall } : {}),
     ...(extra.flatLay ? { flatLay: true } : {}),
+    ...(typeof extra.backgroundLeak === 'number' ? { backgroundLeak: extra.backgroundLeak } : {}),
+    ...(typeof extra.photoIoU === 'number' ? { photoIoU: extra.photoIoU } : {}),
+    ...(extra.maskRepaired ? { maskRepaired: true } : {}),
   }
 }
 
 async function cutoutFromBytes(photo: ProductPhoto, bytes: Uint8Array, hash: string, ctx: CutoutContext): Promise<LoadedCutout | { error: string }> {
-  const local = cutoutMemo.get(hash)
+  const key = cutoutCacheKey(hash)
+  const local = cutoutMemo.get(key)
   if (local && ctx.cache) {
     // Still make sure the storage copy exists (URL for the item) — cheap when it does.
-    const hit = await ctx.cache.get(hash).catch(() => null)
+    const hit = await ctx.cache.get(key).catch(() => null)
     if (hit) {
-      return { stored: storedCutout(photo, hit.url, 'cache', hash, { recall: local.recall, flatLay: local.flatLay || photo.role === 'contents' }), bytes: hit.bytes, width: local.width, height: local.height }
+      return { stored: storedCutout(photo, hit.url, 'cache', hash, { recall: local.recall, flatLay: local.flatLay || photo.role === 'contents', backgroundLeak: local.backgroundLeak, photoIoU: local.photoIoU, maskRepaired: local.maskRepaired }), bytes: hit.bytes, width: local.width, height: local.height }
     }
   }
-  const cached = ctx.cache ? await ctx.cache.get(hash).catch(() => null) : null
+  const cached = ctx.cache ? await ctx.cache.get(key).catch(() => null) : null
   if (cached) {
     const m = await sharp(cached.bytes).metadata()
     return {
-      stored: storedCutout(photo, cached.url, 'cache', hash, { flatLay: await cutoutIsFlatLay(cached.bytes, photo.role) }),
+      // Round 12: the QA metadata rides in the PNG (tEXt) → photoIoU / maskRepaired survive a storage-cache hit
+      stored: storedCutout(photo, cached.url, 'cache', hash, { ...(readCutoutMeta(cached.bytes) ?? {}), flatLay: (readCutoutMeta(cached.bytes)?.flatLay ?? false) || (await cutoutIsFlatLay(cached.bytes, photo.role)) }),
       bytes: cached.bytes,
       width: m.width ?? 0,
       height: m.height ?? 0,
@@ -151,20 +169,20 @@ async function cutoutFromBytes(photo: ProductPhoto, bytes: Uint8Array, hash: str
     const res = await segmentProduct({ bytes, role: photo.role, label: photo.label, gateway: ctx.gateway })
     // cutout_incomplete: a mask was found but it dropped product pieces — never delivered (P0 #4).
     if (!res.ok) return { error: `${res.reason}: ${res.detail}` }
-    made = { png: new Uint8Array(res.png), width: res.width, height: res.height, method: res.method, ...(res.recall ? { recall: res.recall.recall } : {}), ...(res.flatLay ? { flatLay: true } : {}) }
-    remember(cutoutMemo, hash, made)
+    made = { png: new Uint8Array(res.png), width: res.width, height: res.height, method: res.method, ...(res.recall ? { recall: res.recall.recall } : {}), ...(res.flatLay ? { flatLay: true } : {}), ...(typeof res.backgroundLeak === 'number' ? { backgroundLeak: res.backgroundLeak } : {}), ...(typeof res.photoIoU === 'number' ? { photoIoU: res.photoIoU } : {}), ...(res.maskCoverage?.repaired ? { maskRepaired: true } : {}) }
+    remember(cutoutMemo, key, made)
   }
-  const png = made.png
+  const png = writeCutoutMeta(made.png, { photoIoU: made.photoIoU, maskRepaired: made.maskRepaired, recall: made.recall, backgroundLeak: made.backgroundLeak, flatLay: made.flatLay })
   let url = `data:image/png;base64,${Buffer.from(png).toString('base64')}`
   if (ctx.cache) {
     try {
-      url = (await ctx.cache.put(hash, png)).url
+      url = (await ctx.cache.put(key, png)).url
     } catch {
       // cache best-effort: keep the data URL
     }
   }
   return {
-    stored: storedCutout(photo, url, made.method, hash, { recall: made.recall, flatLay: made.flatLay || photo.role === 'contents' }),
+    stored: storedCutout(photo, url, made.method, hash, { recall: made.recall, flatLay: made.flatLay || photo.role === 'contents', backgroundLeak: made.backgroundLeak, photoIoU: made.photoIoU, maskRepaired: made.maskRepaired }),
     bytes: png,
     width: made.width,
     height: made.height,
@@ -247,6 +265,11 @@ export interface ExactImageInput {
   styleNotes?: string
   palette?: string[]
   allowedProps?: string[]
+  /** Round 12: strict prop lock (MCP exact): only allowedProps + surface / wall / light in the plate. */
+  strictProps?: boolean
+  /** Round 12: where the product goes (plate fractions) — the generated attempt's located product box on a fidelity
+   * fallback, so the real product keeps the scale and the ground line the scene was composed for. */
+  region?: PlateRegion
   /** Product appearance facts that never change (plate prompt, plate check, relight). */
   immutableAttributes?: string[]
   /**
@@ -272,8 +295,27 @@ export type ExactImageResult =
       plateModel: string
       cutout: StoredCutout
       warnings: string[]
+      /** Where the real product sits in `png` (px). */
+      productBox: Box
+      /** Cut-out as placed (RGBA PNG, box size) — edge-roughness input. */
+      placed: Buffer
+      /** Halo / leftover-backdrop measurement of the composite (free, local). */
+      halo: HaloReport
     }
   | { ok: false; error: string; costUsd: number; warnings: string[] }
+
+/**
+ * Round 12: a located product box from a generated scene → placement region. Kept in frame, at least 30 % wide (a
+ * shrunken located box never turns the product into a sticker), the base (y1) is the ground line of the plate.
+ */
+export function fallbackRegion(b: PlateRegion): PlateRegion {
+  const cx = (b.x0 + b.x1) / 2
+  const w = Math.min(0.9, Math.max(0.3, b.x1 - b.x0))
+  const y1 = Math.min(0.9, Math.max(0.45, b.y1))
+  const h = Math.min(y1 - 0.05, Math.max(0.2, b.y1 - b.y0))
+  const x0 = Math.min(Math.max(0.03, cx - w / 2), 0.97 - w)
+  return { x0, x1: x0 + w, y0: y1 - h, y1, baseY: y1 }
+}
 
 /** Product placement for a single image: centered, lower-middle, ~55% of the width. */
 export function singleImageRegion(ratio: string): PlateRegion {
@@ -310,7 +352,7 @@ export async function generateExactProductImage(input: ExactImageInput): Promise
   const cutouts = await prepareProductCutouts({ photos: input.photos, format: 'offer_graphic', language: input.language, withParts: false, gateway: input.gateway, cache: input.cache, load: input.load })
   if (!cutouts.ok) return { ok: false, error: cutouts.error, costUsd, warnings: cutouts.warnings }
   warnings.push(...cutouts.warnings)
-  const region = singleImageRegion(input.ratio)
+  const region = input.region ? fallbackRegion(input.region) : singleImageRegion(input.ratio)
   const light: LightDirection = plateLight(input.variation ?? 0)
   const surface = plateSurface('offer_graphic', input.variation ?? 0)
   const dna = minimalDna(input)
@@ -325,7 +367,7 @@ export async function generateExactProductImage(input: ExactImageInput): Promise
   for (let a = 0; a < attempts && !plateBytes; a++) {
     let plate
     try {
-      plate = await generatePlate({ gateway: input.gateway, format: 'offer_graphic', dna, offer, placement: region, light, surface, variation: input.variation, allowedProps: input.allowedProps, immutableAttributes: input.immutableAttributes, sceneBrief: input.sceneHint, draft: false, promptSuffix: hint, ratio: (isSupportedImageRatio(input.ratio) ? input.ratio : '9:16') as AspectRatio })
+      plate = await generatePlate({ gateway: input.gateway, format: 'offer_graphic', dna, offer, placement: region, light, surface, variation: input.variation, allowedProps: input.allowedProps, ...(input.strictProps ? { strictProps: true } : {}), immutableAttributes: input.immutableAttributes, sceneBrief: input.sceneHint, draft: false, promptSuffix: hint, ratio: (isSupportedImageRatio(input.ratio) ? input.ratio : '9:16') as AspectRatio })
     } catch (error) {
       warnings.push(`plate attempt ${a + 1} failed: ${error instanceof Error ? error.message : String(error)}`)
       continue
@@ -335,7 +377,7 @@ export async function generateExactProductImage(input: ExactImageInput): Promise
     const reframed = await reframeToRatio(plate.bytes, input.ratio, { mode: 'cover' })
     const canvas = await sharp(reframed.bytes).resize(size.width, size.height, { fit: 'cover' }).removeAlpha().png().toBuffer()
     try {
-      lastCheck = await checkPlate({ gateway: input.gateway, plateImage: `data:image/png;base64,${canvas.toString('base64')}`, refs, allowedProps: input.allowedProps, placement: region, language: input.language, immutableAttributes: input.immutableAttributes })
+      lastCheck = await checkPlate({ gateway: input.gateway, plateImage: `data:image/png;base64,${canvas.toString('base64')}`, refs, allowedProps: input.allowedProps, ...(input.strictProps ? { strictProps: true } : {}), placement: region, language: input.language, immutableAttributes: input.immutableAttributes })
       costUsd += lastCheck.costUsd
     } catch (error) {
       warnings.push(`plate check unavailable: ${error instanceof Error ? error.message : String(error)}`)
@@ -365,6 +407,11 @@ export async function generateExactProductImage(input: ExactImageInput): Promise
   const p0 = comp.placements[0]
   const score = await scoreFidelity({ image: png, box: p0.box, reference: p0.placed, ...(p0.background ? { background: p0.background } : {}), method, diff: true })
   if (!score.passed) return { ok: false, error: `fidelity_failed: ${fidelityFailReason(score)}`, costUsd, warnings }
+  // Round 11: the cut-out vs the reference PHOTO (the score above compares the composite with its own cut-out)
+  const photoIoU = cutouts.hero.stored.photoIoU
+  if (cutouts.hero.stored.maskRepaired) warnings.push('cut-out mask repaired: a light part of the product on a light backdrop was missed by the first mask and added back')
+  if (typeof photoIoU === 'number' && photoIoU < PHOTO_IOU_WARN) warnings.push(`cut-out vs the reference photo: silhouette IoU ${photoIoU} < ${PHOTO_IOU_WARN} — part of the product may be missing or extra backdrop kept`)
+  const halo = await measureHalo({ composite: png, box: p0.box, placed: p0.placed, ...(p0.background ? { background: p0.background } : { background: p0.placed }), ...(typeof cutouts.hero.stored.backgroundLeak === 'number' ? { leak: cutouts.hero.stored.backgroundLeak } : {}) }).catch((): HaloReport => ({ leak: null, haze: 0, ringPixels: 0, flagged: false, reasons: [] }))
   return {
     ok: true,
     png,
@@ -376,6 +423,9 @@ export async function generateExactProductImage(input: ExactImageInput): Promise
     plateModel,
     cutout: cutouts.hero.stored,
     warnings,
+    productBox: p0.box,
+    placed: p0.placed,
+    halo,
   }
 }
 
@@ -386,14 +436,16 @@ export async function generateExactProductImage(input: ExactImageInput): Promise
 export type ToolProductFidelity = 'exact' | 'generated'
 
 /**
- * `productFidelity` for single-image tools: default 'exact' when a product reference exists;
- * 'generated' when asked or without a product photo. Exact without a photo is an input error.
+ * `productFidelity` for single-image tools: default 'generated' (the web-app Grok flow with PRODUCT LOCK);
+ * 'exact' (real-pixel cutout composite) is opt-in. Exact without a photo is an input error.
  */
-export function resolveToolProductFidelity(raw: unknown, hasProductRef: boolean): ToolProductFidelity {
+export function resolveToolProductFidelity(raw: unknown, hasProductRef: boolean, opts: { /** Round 9 (MCP): printed packs / pouches default to the real-pixel path. */ defaultExact?: boolean } = {}): ToolProductFidelity {
   if (raw !== undefined && raw !== null && raw !== 'exact' && raw !== 'generated') throw new Error('productFidelity must be "exact" or "generated"')
   if (raw === 'exact' && !hasProductRef) throw new Error('productFidelity "exact" needs a product photo (productImageId / product reference).')
-  if (raw === 'generated') return 'generated'
-  return hasProductRef ? 'exact' : 'generated'
+  if (raw === 'exact') return 'exact'
+  if ((raw === undefined || raw === null) && opts.defaultExact && hasProductRef) return 'exact'
+  // Web-app path by default (Grok /edits + PRODUCT LOCK); 'exact' (cutout composite) is opt-in only.
+  return 'generated'
 }
 
 /** Photos from plain product URLs (first = hero) for the tools that only know URLs. */

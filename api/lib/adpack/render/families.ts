@@ -122,6 +122,38 @@ export const FAMILY_SPECS: Record<LayoutFamily, FamilySpec> = {
     sceneHint: (f) =>
       f === 'before_after' ? '' : 'product in the upper-middle of the frame; the lower 40% simple and low-detail (a white card covers it)',
   },
+  studio_hero: {
+    id: 'studio_hero',
+    label: { es: 'Estudio editorial', en: 'Studio editorial' },
+    description: 'Approved v1 look (cream, product top, text bottom): studio canvas with the real photo bled in large, kicker with accent rule, big headline, price as type with the shipping rule, facts line, text-link CTA and a large logo badge. Used automatically for studio-bleed renders.',
+    formats: ['offer_graphic', 'variant_card', 'explainer'],
+    placements: () => ['default'],
+    sceneHint: () => '',
+  },
+  studio_top: {
+    id: 'studio_top',
+    label: { es: 'Estudio titular arriba', en: 'Estudio titular arriba' },
+    description: 'Studio canvas: headline with accent underline on top, the real photo bled in large, price + facts + CTA row at the bottom. Studio-bleed renders only.',
+    formats: ['offer_graphic', 'variant_card', 'explainer'],
+    placements: () => ['default'],
+    sceneHint: () => '',
+  },
+  studio_navy_top: {
+    id: 'studio_navy_top',
+    label: { es: 'Estudio banda navy arriba', en: 'Estudio banda navy arriba' },
+    description: 'Navy band on top with headline, price and shipping rule; the real photo bled in large on the studio canvas; CTA + logo row at the bottom. Studio-bleed renders only.',
+    formats: ['offer_graphic', 'variant_card', 'explainer'],
+    placements: () => ['default'],
+    sceneHint: () => '',
+  },
+  studio_navy_bottom: {
+    id: 'studio_navy_bottom',
+    label: { es: 'Estudio banda navy abajo', en: 'Estudio banda navy abajo' },
+    description: 'Real photo bled in large on the studio canvas; navy band at the bottom with headline, price, shipping rule, CTA and logo. Studio-bleed renders only.',
+    formats: ['offer_graphic', 'variant_card', 'explainer'],
+    placements: () => ['default'],
+    sceneHint: () => '',
+  },
   ugc_native: {
     id: 'ugc_native',
     label: { es: 'Post nativo', en: 'Native post' },
@@ -556,13 +588,25 @@ function offerTag(ctx: Ctx, o: { x: number; y: number; maxW: number; align: Alig
   })
 }
 
-/** Round price sticker (falls back to a rounded tag when the offer is too long for a circle). */
+/** Shipping / delivery part of an offer line ("Envío gratis llevando 2 kits o más"). */
+const SHIPPING_PART_RE = /\b(?:env[ií]os?|shipping|delivery|despacho|entrega)\b/i
+
+/**
+ * Round price sticker (falls back to a rounded tag when the offer is too long for a circle).
+ * Round-1 P6: prices break at their " · " separators ("1 kit ₡14.900" / "2 kits ₡29.800"), never
+ * after a dangling "·", and a shipping rule rides in a ribbon under the circle instead of being
+ * squeezed into it at an unreadable size.
+ */
 function offerSticker(ctx: Ctx, o: { right: number; top: number; fill: Rgb; maxD: number }): { nodes: Node[]; box: Box } | null {
   if (!ctx.copy.offer) return null
   const ring = Math.max(4, sz(ctx, 7))
+  const parts = ctx.copy.offer.split(' · ').map((p) => p.trim()).filter(Boolean)
+  const shipIdx = parts.length >= 2 ? parts.findIndex((p, i) => i > 0 && SHIPPING_PART_RE.test(p)) : -1
+  const circleText = shipIdx > 0 ? parts.filter((_, i) => i !== shipIdx).join(' · ') : ctx.copy.offer
+  const ribbonText = shipIdx > 0 ? parts[shipIdx] : ''
   for (const d of [o.maxD, Math.round(o.maxD * 1.12)]) {
     const inner = Math.round(d * 0.72)
-    const t = textNode('offer', ctx.copy.offer, {
+    const t = textNode('offer', circleText, {
       x: 0,
       y: 0,
       maxW: inner,
@@ -576,18 +620,43 @@ function offerSticker(ctx: Ctx, o: { right: number; top: number; fill: Rgb; maxD
       lh: 1.08,
       maxH: inner,
       fill: o.fill,
+      segmentBreaks: true,
     })
     if (!t.fitted.fits || t.box.h > inner) continue
     const box = { x: o.right - d, y: o.top, w: d, h: d }
     t.box = { ...t.box, x: Math.round(box.x + (d - t.box.w) / 2), y: Math.round(box.y + (d - t.box.h) / 2) }
-    return {
-      nodes: [
-        { kind: 'rect', layer: 'over', box: { x: box.x - ring, y: box.y - ring, w: d + ring * 2, h: d + ring * 2 }, color: WHITE, radius: (d + ring * 2) / 2, shadow: 'strong', decor: true },
-        { kind: 'rect', layer: 'over', box, color: o.fill, radius: d / 2, pill: { role: 'offer', text: t, icons: [] } },
-        t,
-      ],
-      box,
+    const nodes: Node[] = [
+      { kind: 'rect', layer: 'over', box: { x: box.x - ring, y: box.y - ring, w: d + ring * 2, h: d + ring * 2 }, color: WHITE, radius: (d + ring * 2) / 2, shadow: 'strong', decor: true },
+      { kind: 'rect', layer: 'over', box, color: o.fill, radius: d / 2, pill: { role: 'offer', text: t, icons: [] } },
+      t,
+    ]
+    let outer = box
+    if (ribbonText) {
+      const w = d + ring * 2
+      // Same role: it IS the offer line's last part (the report lists both offer blocks).
+      const ribbon = pill('offer', ribbonText, {
+        x: box.x - ring,
+        y: box.y + d + ring + sz(ctx, 10),
+        maxW: w,
+        align: 'center',
+        fill: WHITE,
+        textColor: readableTint(o.fill, WHITE),
+        font: headingFont(ctx),
+        size: Math.max(sz(ctx, 20), Math.round(d * 0.085)),
+        min: Math.max(sz(ctx, 16), Math.round(d * 0.06)),
+        lines: 2,
+        lh: 1.08,
+        padX: sz(ctx, 14),
+        padY: sz(ctx, 8),
+        radius: sz(ctx, 12),
+        shadow: 'soft',
+      })
+      if (!ribbon.text.fitted.fits) continue
+      nodes.push(...ribbon.nodes)
+      const x0 = Math.min(box.x, ribbon.box.x)
+      outer = { x: x0, y: box.y, w: Math.max(box.x + d, ribbon.box.x + ribbon.box.w) - x0, h: ribbon.box.y + ribbon.box.h - box.y }
     }
+    return { nodes, box: outer }
   }
   const tag = offerTag(ctx, { x: o.right - o.maxD * 1.6, y: o.top, maxW: Math.round(o.maxD * 1.6), align: 'right', fill: o.fill, size: 40, radius: sz(ctx, 18) })
   return tag ? { nodes: tag.nodes, box: tag.box } : null
@@ -637,10 +706,12 @@ function splitColumns(
 }
 
 /** Logo slot of a given max height at a corner of a box. */
-function logoIn(ctx: Ctx, area: Box, side: 'left' | 'right', maxH = 56): { box?: Box; nextY: number } {
+function logoIn(ctx: Ctx, area: Box, side: 'left' | 'right', maxH = 84): { box?: Box; nextY: number } {
   if (!ctx.logo) return { nextY: area.y }
-  const mh = Math.round(maxH * ctx.frame.type)
-  const s = Math.min(220 / ctx.logo.width, mh / ctx.logo.height)
+  // Square / tall logos get more height (same visual weight as a wide wordmark).
+  const aspect = ctx.logo.width / ctx.logo.height
+  const mh = Math.round(maxH * ctx.frame.type * (aspect < 1.4 ? 1.3 : 1))
+  const s = Math.min((aspect >= 4 ? 420 : 300) / ctx.logo.width, mh / ctx.logo.height)
   const w = Math.max(1, Math.round(ctx.logo.width * s))
   const h = Math.max(1, Math.round(ctx.logo.height * s))
   const x = side === 'left' ? area.x : area.x + area.w - w
@@ -854,7 +925,7 @@ function fullBleedType(ctx: Ctx): TemplateLayout {
   const warnings: string[] = []
   const c = contentOf(ctx, warnings)
   const atTop = ctx.placement === 'top'
-  const logo = logoIn(ctx, S, atTop ? 'right' : 'left', 50)
+  const logo = logoIn(ctx, S, atTop ? 'right' : 'left', 80)
   const z = 'type'
   const st = new Stack(0)
   st.add(0, (y) => { const t = headlineText(ctx, c.headline, { x: S.x, y, w: S.w, align: 'left', size: 146, min: 58, lines: 4, prefer: 3, lh: Math.min(1.0, headlineLh(ctx)), surface: { zone: z } }); return { nodes: [t], bottom: bottom(t.box) } })
@@ -925,7 +996,7 @@ function badgeCorner(ctx: Ctx): TemplateLayout {
   const stickerFill = ensureReadableFill(ctx.palette.badge)
   const btnFill = ensureReadableFill(ctx.palette.primary)
   if (c.split) {
-    const logo = logoIn(ctx, S, 'left', 48)
+    const logo = logoIn(ctx, S, 'left', 80)
     const top = new Stack(logo.box ? logo.nextY : S.y)
     top.add(0, (y) => { const t = headlineText(ctx, c.headline, { x: S.x, y, w: S.w, align: 'center', size: 78, min: 40, lines: 3, surface: { zone: 'top' } }); return { nodes: [t], bottom: bottom(t.box) } })
     if (c.subline) top.add(sz(ctx, 14), (y) => { const t = sublineText(ctx, c.subline, { x: S.x + S.w * 0.06, y, w: S.w * 0.88, align: 'center', size: 30, surface: { zone: 'top' } }); return { nodes: [t], bottom: bottom(t.box) } })
@@ -950,7 +1021,7 @@ function badgeCorner(ctx: Ctx): TemplateLayout {
   // Headline top-left, sticker top-right, spec strip + squared button at the bottom.
   const D = Math.round(Math.min(S.w * 0.34, sz(ctx, 300)))
   const sticker = offerSticker(ctx, { right: right(S), top: S.y, fill: stickerFill, maxD: D })
-  const logo = logoIn(ctx, S, 'left', 48)
+  const logo = logoIn(ctx, S, 'left', 80)
   const headW = sticker ? S.w - sticker.box.w - sz(ctx, 36) : Math.round(S.w * 0.82)
   const top = new Stack(logo.box ? logo.nextY : S.y)
   top.add(0, (y) => { const t = headlineText(ctx, c.headline, { x: S.x, y, w: headW, align: 'left', size: 80, min: 38, lines: 4, prefer: 3, surface: { zone: 'top' } }); return { nodes: [t], bottom: bottom(t.box) } })
@@ -1036,7 +1107,7 @@ function framedCard(ctx: Ctx): TemplateLayout {
     { kind: 'rect', layer: 'under', box: { x: cardX + pad, y: cardY, w: sz(ctx, 70), h: Math.max(5, sz(ctx, 7)) }, color: ctx.palette.accent, radius: 0, decor: true },
     ...st.nodes,
   ]
-  const logo = atTop ? logoIn(ctx, { x: S.x, y: bottom(S) - Math.round(56 * ctx.frame.type), w: S.w, h: 60 }, 'left') : logoIn(ctx, S, 'left')
+  const logo = atTop ? logoIn(ctx, { x: S.x, y: bottom(S) - Math.round(84 * ctx.frame.type), w: S.w, h: 88 }, 'left') : logoIn(ctx, S, 'left')
   const freeTop = atTop ? cardY + cardH + sz(ctx, 24) : logo.box ? logo.nextY : S.y
   const freeBottom = atTop ? (logo.box ? logo.box.y - sz(ctx, 20) : bottom(S)) : cardY - sz(ctx, 24)
   const productBox = c.cutout && ctx.product ? { x: S.x, y: freeTop, w: S.w, h: Math.max(1, freeBottom - freeTop) } : undefined
@@ -1127,6 +1198,176 @@ function ugcNative(ctx: Ctx): TemplateLayout {
 }
 
 // ---------------------------------------------------------------------------
+// Studio families (rounds 1b–1c) — the approved Prototipo v1 look on a procedural studio canvas
+// with the real photo bled in BIG. Four distinct compositions rotate per angle so a pack never
+// repeats a layout:
+//   studio_hero       cream · product top, headline + price + facts + CTA bottom-left
+//   studio_top        cream · headline top with accent underline, product middle, price/CTA row bottom
+//   studio_navy_top   navy band top (headline, price, facts) · product on cream · CTA row bottom
+//   studio_navy_bottom cream product top · navy band bottom (headline, price, facts, CTA, logo)
+// Each ad carries at most: 1 headline, 1 price line, 1 small facts line (the shipping rule), a CTA
+// and the logo. Long facts (age, not-included, WhatsApp) live in the caption.
+// ---------------------------------------------------------------------------
+
+type StudioVariant = 'hero' | 'top' | 'navy_top' | 'navy_bottom'
+
+interface StudioParts {
+  priceText: string
+  shipText: string
+}
+
+function studioParts(ctx: Ctx): StudioParts {
+  const parts = ctx.copy.offer ? ctx.copy.offer.split(' · ').map((p) => p.trim()).filter(Boolean) : []
+  const shipIdx = parts.length >= 2 ? parts.findIndex((p, i) => i > 0 && SHIPPING_PART_RE.test(p)) : -1
+  return { priceText: shipIdx > 0 ? parts.filter((_, i) => i !== shipIdx).join(' · ') : ctx.copy.offer ?? '', shipText: shipIdx > 0 ? parts[shipIdx] : '' }
+}
+
+function studioLayout(ctx: Ctx, variant: StudioVariant): TemplateLayout {
+  const { safe: S, tall, W, H } = ctx.frame
+  const warnings: string[] = []
+  const c = contentOf(ctx, warnings)
+  const nodes: Node[] = []
+  const accent = ctx.palette.accent
+  const dark = (ctx.canvasLum ?? 1) < 0.4
+  const P = ensureReadableFill(ctx.palette.primary)
+  const onP = readableOn(P)
+  const accentP = accentOn(ctx, P)
+  const ink = dark ? WHITE : ctx.palette.primary
+  const { priceText, shipText } = studioParts(ctx)
+  const LIGHT = 'studio'
+  const surface = (band: boolean): Surface => (band ? { fill: P } : { zone: LIGHT })
+  const colorFor = (band: boolean): Rgb | undefined => (band ? onP : ink)
+  const shipColor = (band: boolean): Rgb | undefined => (band ? (contrastRatio(accentP, P) >= 4.5 ? accentP : onP) : ink)
+
+  const headline = (y: number, band: boolean, size: number): { nodes: Node[]; bottom: number } => {
+    const t = headlineText(ctx, c.headline, { x: S.x, y, w: S.w, align: 'left', size, min: 46, lines: 3, prefer: 2, lh: Math.min(1.04, headlineLh(ctx)), surface: surface(band) })
+    return { nodes: [t], bottom: bottom(t.box) }
+  }
+  const price = (y: number, band: boolean): { nodes: Node[]; bottom: number } | null => {
+    if (!priceText) return null
+    const t = textNode('offer', priceText, { x: S.x, y, maxW: S.w, align: 'left', font: headingFont(ctx), size: sz(ctx, tall ? 72 : 64), min: sz(ctx, 34), lines: 2, prefer: 1, preferMin: sz(ctx, 46), lh: 1.08, segmentBreaks: true, ...(band ? { fill: P, color: onP } : { zone: LIGHT, color: ink }) })
+    return { nodes: [t], bottom: bottom(t.box) }
+  }
+  const facts = (y: number, band: boolean): { nodes: Node[]; bottom: number } | null => {
+    if (!shipText) return null
+    const t = textNode('offer', shipText, { x: S.x, y, maxW: S.w, align: 'left', font: bodyFont(ctx, true), size: sz(ctx, 28), min: sz(ctx, 20), lines: 2, lh: 1.25, ...(band ? { fill: P, color: shipColor(true) } : { zone: LIGHT, color: shipColor(false) }) })
+    return { nodes: [t], bottom: bottom(t.box) }
+  }
+  const logo = logoIn(ctx, { x: S.x, y: 0, w: S.w, h: 0 }, 'right', tall ? 92 : 88)
+  // No logo asset: the brand name stands in as a large text wordmark (the gate reports it as such).
+  const wordmark = (band: boolean): TextNode | null =>
+    !logo.box && ctx.brandName
+      ? textNode('bullet', ctx.brandName, { x: 0, y: 0, maxW: Math.round(S.w * 0.42), align: 'left', font: headingFont(ctx), size: sz(ctx, tall ? 60 : 54), min: sz(ctx, 38), lines: 1, lh: 1.1, ...(band ? { fill: P, color: onP } : { zone: LIGHT, color: ink }) })
+      : null
+  const logoW = logo.box ? logo.box.w + sz(ctx, 30) : (wordmark(false)?.box.w ?? 0) + (ctx.brandName && !logo.box ? sz(ctx, 30) : 0)
+  const ctaRow = (y: number, band: boolean): { nodes: Node[]; bottom: number } => {
+    const cta = ctaLink(ctx, { x: S.x, y, maxW: S.w - logoW, align: 'left', surface: surface(band), size: 30 })
+    const wm = wordmark(band)
+    const rowH = Math.max(cta?.box.h ?? 0, logo.box?.h ?? 0, wm?.box.h ?? 0)
+    const out: Node[] = []
+    if (wm) {
+      wm.box = { ...wm.box, x: Math.round(right(S) - wm.box.w), y: Math.round(y + (rowH - wm.box.h) / 2) }
+      out.push(wm)
+    }
+    if (cta) {
+      moveNodes(cta.nodes, 0, (rowH - cta.box.h) / 2)
+      out.push(...cta.nodes)
+    }
+    if (logo.box) logo.box = { ...logo.box, y: Math.round(y + (rowH - logo.box.h) / 2) }
+    return { nodes: out, bottom: y + rowH }
+  }
+  const hSize = tall ? 104 : 92
+  const pushStack = (st: Stack) => nodes.push(...st.nodes)
+  let productBox: Box | undefined
+  let bleedClip: Box | undefined
+  let fits = true
+  const tone = dark ? ('dark' as const) : ('light' as const)
+  let zones: TemplateLayout['zones'] = [{ id: LIGHT, style: 'gradient-bottom', tone, fade: 0.2, ...(dark ? {} : { ink }) }]
+  const gapP = sz(ctx, tall ? 50 : 30)
+
+  if (variant === 'hero' || variant === 'navy_bottom') {
+    // Bottom group anchored to the safe bottom; product fills everything above it.
+    const band = variant === 'navy_bottom'
+    const st = new Stack(0)
+    st.add(0, (y) => headline(y, band, hSize))
+    st.add(sz(ctx, 22), (y) => price(y, band))
+    st.add(sz(ctx, 10), (y) => facts(y, band))
+    st.add(sz(ctx, 26), (y) => ctaRow(y, band))
+    const h = st.y
+    moveNodes(st.nodes, 0, bottom(S) - h)
+    if (logo.box) logo.box = { ...logo.box, y: logo.box.y + bottom(S) - h }
+    const groupTop = bottom(S) - h
+    if (band) {
+      const pad = sz(ctx, 46)
+      const panelTop = Math.max(0, groupTop - pad)
+      nodes.push({ kind: 'rect', layer: 'under', box: { x: 0, y: panelTop, w: W, h: H - panelTop }, color: P, radius: 0 })
+      nodes.push({ kind: 'rect', layer: 'under', box: { x: 0, y: panelTop, w: W, h: Math.max(6, sz(ctx, 10)) }, color: accent, radius: 0, decor: true })
+      bleedClip = { x: 0, y: 0, w: W, h: panelTop }
+      zones = []
+      const y0 = S.y
+      if (c.cutout && ctx.product) productBox = { x: S.x, y: y0, w: S.w, h: Math.max(1, panelTop - sz(ctx, 24) - y0) }
+      fits = panelTop >= y0 + H * 0.2
+    } else {
+      const y0 = S.y + sz(ctx, tall ? 40 : 10)
+      if (c.cutout && ctx.product) productBox = { x: S.x, y: y0, w: S.w, h: Math.max(1, groupTop - gapP - y0) }
+      fits = groupTop >= y0 + sz(ctx, 40) && (!productBox || productBox.h >= H * 0.24)
+    }
+    pushStack(st)
+  } else if (variant === 'top') {
+    const top = new Stack(S.y)
+    top.add(0, (y) => headline(y, false, hSize))
+    const barY = top.y + sz(ctx, 16)
+    nodes.push({ kind: 'rect', layer: 'over', box: { x: S.x, y: Math.round(barY), w: sz(ctx, 150), h: Math.max(6, sz(ctx, 9)) }, color: accent, radius: 3, decor: true })
+    const topBottom = barY + Math.max(6, sz(ctx, 9))
+    const bot = new Stack(0)
+    bot.add(0, (y) => price(y, false))
+    bot.add(sz(ctx, 10), (y) => facts(y, false))
+    bot.add(sz(ctx, 26), (y) => ctaRow(y, false))
+    const h = bot.y
+    moveNodes(bot.nodes, 0, bottom(S) - h)
+    if (logo.box) logo.box = { ...logo.box, y: logo.box.y + bottom(S) - h }
+    const botTop = bottom(S) - h
+    pushStack(top)
+    pushStack(bot)
+    const y0 = topBottom + sz(ctx, tall ? 40 : 12)
+    if (c.cutout && ctx.product) productBox = { x: S.x, y: y0, w: S.w, h: Math.max(1, botTop - gapP - y0) }
+    fits = botTop >= y0 + H * 0.2 && (!productBox || productBox.h >= H * 0.22)
+    zones = [{ id: LIGHT, style: 'gradient-top', tone, fade: 0.12, ...(dark ? {} : { ink }) }, { id: 'studio_b', style: 'gradient-bottom', tone, fade: 0.18, ...(dark ? {} : { ink }) }]
+    // bottom texts sit on the lower scrim zone
+    for (const n of bot.nodes) if (n.kind === 'text' || (n.kind === 'icon' && n.zone) || (n.kind === 'rect' && n.zone)) (n as { zone?: string }).zone = n.zone ? 'studio_b' : n.zone
+  } else {
+    // navy_top: navy band with headline, price and facts; product on cream; CTA + logo row bottom.
+    const pad = sz(ctx, 46)
+    const st = new Stack(S.y)
+    st.add(0, (y) => headline(y, true, tall ? 100 : 88))
+    st.add(sz(ctx, 20), (y) => price(y, true))
+    st.add(sz(ctx, 8), (y) => facts(y, true))
+    const bandBottom = st.y + pad
+    nodes.push({ kind: 'rect', layer: 'under', box: { x: 0, y: 0, w: W, h: Math.round(bandBottom) }, color: P, radius: 0 })
+    nodes.push({ kind: 'rect', layer: 'under', box: { x: 0, y: Math.round(bandBottom), w: W, h: Math.max(6, sz(ctx, 10)) }, color: accent, radius: 0, decor: true })
+    const row = new Stack(0)
+    row.add(0, (y) => ctaRow(y, false))
+    const h = row.y
+    moveNodes(row.nodes, 0, bottom(S) - h)
+    if (logo.box) logo.box = { ...logo.box, y: logo.box.y + bottom(S) - h }
+    const rowTop = bottom(S) - h
+    pushStack(st)
+    pushStack(row)
+    const y0 = bandBottom + sz(ctx, 20)
+    bleedClip = { x: 0, y: Math.round(bandBottom + Math.max(6, sz(ctx, 10))), w: W, h: H }
+    if (c.cutout && ctx.product) productBox = { x: S.x, y: y0, w: S.w, h: Math.max(1, rowTop - gapP - y0) }
+    fits = rowTop >= y0 + H * 0.24 && (!productBox || productBox.h >= H * 0.24)
+    zones = [{ id: LIGHT, style: 'gradient-bottom', tone, fade: 0.14, ...(dark ? {} : { ink }) }]
+  }
+  return { nodes, zones, productBox, productValign: variant === 'navy_top' || variant === 'top' ? 'center' : 'bottom', ...(bleedClip ? { bleedClip } : {}), logoBox: logo.box, fits, warnings }
+}
+
+const studioHero = (ctx: Ctx) => studioLayout(ctx, 'hero')
+const studioTop = (ctx: Ctx) => studioLayout(ctx, 'top')
+const studioNavyTop = (ctx: Ctx) => studioLayout(ctx, 'navy_top')
+const studioNavyBottom = (ctx: Ctx) => studioLayout(ctx, 'navy_bottom')
+
+// ---------------------------------------------------------------------------
 // Registry + mirroring
 // ---------------------------------------------------------------------------
 
@@ -1151,6 +1392,10 @@ const COMPOSERS: Record<Exclude<LayoutFamily, 'bold_pill'>, (ctx: Ctx) => Templa
   badge_corner: badgeCorner,
   framed_card: framedCard,
   ugc_native: ugcNative,
+  studio_hero: studioHero,
+  studio_top: studioTop,
+  studio_navy_top: studioNavyTop,
+  studio_navy_bottom: studioNavyBottom,
 }
 
 /** Lay out one format in one family at `ctx.placement` / `ctx.s`. */

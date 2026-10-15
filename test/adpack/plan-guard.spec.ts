@@ -199,6 +199,9 @@ describe('F1 through the web door (parity)', () => {
     const plan = (web.body as { plan: Array<Record<string, unknown>> }).plan
     expect(plan.map((p) => p.angleId)).toEqual(angleIds)
     for (const p of plan) expect(p).toMatchObject({ index: expect.any(Number), rationale: expect.any(String), layoutFamily: expect.any(String), format: expect.any(String), ratios: ['4:5', '9:16'] })
-    expect(mcp.payload).toEqual(web.body)
+    // Round-1 P7: the MCP quote also carries the credit balance when it is readable (MCP-only field).
+    const { creditsRemaining, ...mcpQuote } = mcp.payload as Record<string, unknown>
+    if (creditsRemaining !== undefined) expect(typeof creditsRemaining).toBe('number')
+    expect(mcpQuote).toEqual(web.body)
   })
 })

@@ -14,7 +14,7 @@ import { readBrandProfile, type BrandLogoVariant, type BrandLogoVariantKind } fr
 import { labelWithRole } from '../adpack/fidelity/photos.js'
 import { resolveBrandKitForBusiness } from '../brand-kit-resolve.js'
 import { safeFilename, uploadPath } from './asset-rehost.js'
-import { LABEL_MAX, PART_NAME_MAX } from './text-limits.js'
+import { clipWithNotice, LABEL_MAX, PART_NAME_MAX, ROLE_DB_MAX, type TruncationNotice } from './text-limits.js'
 import { PRODUCT_PHOTO_ROLES, isProductPhotoRole, roleFromLabel } from '../adpack/fidelity/photos.js'
 import { PRODUCT_IMAGE_TAGS, type ProductImageTag } from '../product-image-order.js'
 import type { ProductPhotoRole } from '../adpack/types.js'
@@ -267,6 +267,7 @@ export async function mcpFinalizeUpload(options: {
   const url = store.publicUrl(path)
   const role = typeof meta.role === 'string' ? meta.role : undefined
   const warnings: string[] = []
+  const roleNotices: TruncationNotice[] = []
   let saved: Row
   let quality: Row | null = null
   if (kind === 'product_photo') {
@@ -291,7 +292,9 @@ export async function mcpFinalizeUpload(options: {
       if (tags.length) row.tags = tags
       // Free part name ("control tipo gamepad") like import_image; legacy free roles stay as before.
       const partName = typeof meta.legacyRole === 'string' ? meta.legacyRole : typeof meta.label === 'string' ? meta.label : ''
-      if (partName) row.role = partName
+      // Round 11: labels up to LABEL_MAX (160) no longer fail the DB's 60-character role constraint — role gets a visible
+      // shortening, the full name stays in label (reported as truncated: [{ field: 'role', … }])
+      if (partName) row.role = clipWithNotice('role', partName, ROLE_DB_MAX, roleNotices)
       if (quality) row.quality = quality
       if (setPrimary) {
         await store.clearPrimaryImages({ userId: user.id, offerId })
@@ -329,6 +332,7 @@ export async function mcpFinalizeUpload(options: {
     ...(role ? { role } : {}),
     ...saved,
     ...(warnings.length ? { warnings } : {}),
+    ...(roleNotices.length ? { truncated: roleNotices } : {}),
     creditsNote: 'Free — no Advance credits.',
   }
   await store.updateUploadRecord({ userId: user.id, uploadId, metadata: { ...meta, status: 'finalized', result: out } })
