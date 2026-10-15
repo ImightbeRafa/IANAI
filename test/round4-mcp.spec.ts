@@ -198,17 +198,16 @@ describe('exact mode renders the SAME ad layers (copy, one CTA, logo) + QA + hal
     expect((out.fidelity as { score: number }).score).toBe(0.965)
   })
 
-  it('capacity errors from the plate step are retried inside the job and never surface', async () => {
+  it('0.26.0: the whole paid exact pipeline runs ONCE — a failed run is never re-run by a provider retry (retries live on single HTTP calls only)', async () => {
     let n = 0
-    const out = await generateExactWebStyleAd({
+    await expect(generateExactWebStyleAd({
       exact: {} as never, ctx, offerId: 'o1', copy, ratio: '4:5', language: 'es',
       exactRunner: async () => {
-        if (n++ < 2) return { ok: false, error: 'scene_failed', costUsd: 0, warnings: ['plate attempt 1 failed: The service is temporarily at capacity. Please retry your request shortly.'] }
-        return fakeExact(0)
+        n++
+        return { ok: false, error: 'scene_failed', costUsd: 0.07, warnings: ['plate attempt 1 failed: The service is temporarily at capacity. Please retry your request shortly.'] }
       },
-    })
-    expect(n).toBe(3)
-    expect(out.providerRetries).toBe(2)
+    })).rejects.toThrow(/scene_failed/)
+    expect(n).toBe(1)
   })
 })
 
@@ -216,7 +215,7 @@ describe('server info (version visible in a tool response)', () => {
   it('reports the MCP version, build commit when known, and the feature list', () => {
     const info = buildServerInfo({ commit: 'abc1234' })
     expect(info.version).toBe(MCP_VERSION)
-    expect(info.version).toBe('0.25.0')
+    expect(info.version).toBe('0.26.0')
     expect(info.commit).toBe('abc1234')
     expect(info.features).toEqual(expect.arrayContaining(['generated_web_flow', 'exact_with_text_logo_qa', 'auto_retry_keep_better', 'provider_retry_backoff']))
     expect(MCP_SERVER_INFO.name).toBeTruthy()

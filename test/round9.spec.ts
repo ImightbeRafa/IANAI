@@ -5,7 +5,7 @@
  *  2. the offer lock is scoped to the selected photo (controller hero: no plane attributes, no cable);
  *  3. thin cable-like objects are found by shape;
  *  4. logo: trimmed, fitted by real aspect, wordmark before icon, solid plate when contrast < 4.5;
- *  5. printed pack text OCR (tesseract) + exact default for packs;
+ *  5. (0.26.0: pack OCR + the exact default for packs were removed — packs get the model-designed ad + the real-pixel swap);
  *  6. the raw scene rides in the result.
  * Fixtures (test/fixtures/round9): crops of the round-8 LIVE posts (final images — raw scenes were not saved in round 8) and of the real PatchHouse photo
  * from the round-8 comparison sheet. No model call anywhere.
@@ -19,7 +19,6 @@ import { layoutAdLayers, splitCopyBlocks } from '../api/lib/mcp/layout-ad'
 import { generateWebStyleImage, scopeLockToPhotoRole } from '../api/lib/mcp/web-image'
 import { findThinStructures } from '../api/lib/mcp/scene-objects'
 import { adLogoCandidates, loadAdLogo, trimLogoPadding } from '../api/lib/mcp/logo-check'
-import { checkPackText, compareWords, editDistance, ocrAvailable } from '../api/lib/mcp/pack-ocr'
 import { isPackProduct } from '../api/lib/mcp/product-kind'
 import { resolveToolProductFidelity } from '../api/lib/adpack/fidelity/pipeline'
 import { MCP_VERSION } from '../api/lib/mcp/server-info'
@@ -151,35 +150,14 @@ describe('4. logo: trim, real aspect, wordmark first, solid plate', () => {
   })
 })
 
-describe('5. pack fidelity: OCR of the printing + exact default for packs', () => {
-  it('compareWords: "Ciarity" / "Pick-Me-Lip" are misspellings (fail), a faithful copy passes', () => {
-    expect(editDistance('clarity', 'ciarity')).toBe(1)
-    const ref = ['energy', 'patches', 'pick-me-up', 'mental', 'clarity', 'caffeine']
-    expect(compareWords(ref, ['energy', 'patches', 'pick-me-lip', 'mental', 'ciarity', 'caffeine']).status).toBe('fail')
-    expect(compareWords(ref, ref).status).toBe('pass')
-    // round 10: one misspelled word is a fail too
-    expect(compareWords(ref, ['energy', 'patches', 'pick-me-up', 'mental', 'ciarity', 'caffeine']).status).toBe('fail')
-  })
-  it('tesseract on the real PatchHouse photo vs the round-8 redrawn pouch: fail with the misspelled words; the photo vs itself passes', async () => {
-    if (!(await ocrAvailable())) { console.warn('tesseract not installed: OCR test skipped'); return }
-    const ref = F9('ph-ref-crop.jpg')
-    const bad = await checkPackText({ reference: ref, generated: F9('ph-gen-crop.jpg') })
-    expect(bad.status).toBe('fail')
-    if (bad.status === 'fail') expect(bad.misspelled.map((m) => m.found).join(' ')).toMatch(/pick-me-lip/)
-    const same = await checkPackText({ reference: ref, generated: ref })
-    expect(same.status).toBe('pass')
-  }, 60_000)
-  it('no tesseract binary → unavailable, nothing else changes', async () => {
-    const r = await checkPackText({ reference: Buffer.alloc(1), generated: Buffer.alloc(1), run: async () => { throw new Error('ENOENT') } })
-    expect(r.status).toBe('unavailable')
-  })
-  it('printed packs default to exact when productFidelity is omitted; an explicit "generated" wins; the plane is never a pack', () => {
+describe('5. pack fidelity: no OCR, no exact default (0.26.0)', () => {
+  it('0.26.0: printed packs ignore productFidelity (always generated + real-pixel swap); the plane is never a pack', () => {
     expect(isPackProduct(['Energy Patches', 'Bolsa de 30 parches'])).toBe(true)
     expect(isPackProduct(['Sleeping Patches CR', 'bolsa de 30 noches'])).toBe(true)
     expect(isPackProduct(['Avión de papel DIY con motores', 'Kit con control'])).toBe(false)
-    expect(resolveToolProductFidelity(undefined, true, { defaultExact: true })).toBe('exact')
-    expect(resolveToolProductFidelity('generated', true, { defaultExact: true })).toBe('generated')
-    expect(resolveToolProductFidelity(undefined, false, { defaultExact: true })).toBe('generated')
+    expect(resolveToolProductFidelity(undefined, true, { pack: true })).toBe('generated')
+    expect(resolveToolProductFidelity('exact', true, { pack: true })).toBe('generated')
+    expect(resolveToolProductFidelity('exact', false, { pack: true })).toBe('generated')
     expect(resolveToolProductFidelity(undefined, true)).toBe('generated')
   })
 })
@@ -205,7 +183,7 @@ describe('2 + 6. flow with mock xAI: scoped lock reaches the prompt, raw scene i
       brandKit: { id: 'k1', name: 'Prototipo', primaryColor: '#15263E', secondaryColor: '#F1EDE5', accentColor: '#2EC4B6', logoUrl: durl(LOGO, 'image/png'), referenceImages: [], forbiddenPhrases: [] },
       brandKits: [], latestGuideIntake: null,
     } as never
-    const out = await generateWebStyleImage({ apiKey: 'k', offerId: 'o1', aspectRatio: '4:5', ctx, copy: COPY_B, productUrls: [durl(F6('ctrl.png'), 'image/png')], productPhotoRole: 'part', productPhotoLabel: 'Control remoto', accessories: [{ imageUrl: durl(F6('box.jpg')), label: 'caja TOPGT real' }], lock: { lockProductAppearance: true, immutableAttributes: PLANE_ATTRS, allowedProps: ['caja TOPGT real'], forbidExtraProps: true }, autoRetry: false })
+    const out = await generateWebStyleImage({ apiKey: 'k', offerId: 'o1', aspectRatio: '4:5', ctx, copy: COPY_B, productUrls: [durl(F6('ctrl.png'), 'image/png')], productPhotoRole: 'part', productPhotoLabel: 'Control remoto', accessories: [{ imageUrl: durl(F6('box.jpg')), label: 'caja TOPGT real' }], lock: { lockProductAppearance: true, immutableAttributes: PLANE_ATTRS, allowedProps: ['caja TOPGT real'], forbidExtraProps: true }, autoRetry: false, compositeLayers: true })
     const prompt = out.prompt
     expect(prompt).not.toMatch(/Avión de papel blanco liso|Hélices gris claro|Cable USB/)
     expect(prompt).toMatch(/Control negro tipo gamepad/)
@@ -218,5 +196,5 @@ describe('2 + 6. flow with mock xAI: scoped lock reaches the prompt, raw scene i
 })
 
 describe('version', () => {
-  it('MCP 0.25.0', () => expect(MCP_VERSION).toBe('0.25.0'))
+  it('MCP 0.26.0', () => expect(MCP_VERSION).toBe('0.26.0'))
 })

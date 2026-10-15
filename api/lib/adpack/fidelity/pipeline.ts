@@ -267,9 +267,6 @@ export interface ExactImageInput {
   allowedProps?: string[]
   /** Round 12: strict prop lock (MCP exact): only allowedProps + surface / wall / light in the plate. */
   strictProps?: boolean
-  /** Round 12: where the product goes (plate fractions) — the generated attempt's located product box on a fidelity
-   * fallback, so the real product keeps the scale and the ground line the scene was composed for. */
-  region?: PlateRegion
   /** Product appearance facts that never change (plate prompt, plate check, relight). */
   immutableAttributes?: string[]
   /**
@@ -303,19 +300,6 @@ export type ExactImageResult =
       halo: HaloReport
     }
   | { ok: false; error: string; costUsd: number; warnings: string[] }
-
-/**
- * Round 12: a located product box from a generated scene → placement region. Kept in frame, at least 30 % wide (a
- * shrunken located box never turns the product into a sticker), the base (y1) is the ground line of the plate.
- */
-export function fallbackRegion(b: PlateRegion): PlateRegion {
-  const cx = (b.x0 + b.x1) / 2
-  const w = Math.min(0.9, Math.max(0.3, b.x1 - b.x0))
-  const y1 = Math.min(0.9, Math.max(0.45, b.y1))
-  const h = Math.min(y1 - 0.05, Math.max(0.2, b.y1 - b.y0))
-  const x0 = Math.min(Math.max(0.03, cx - w / 2), 0.97 - w)
-  return { x0, x1: x0 + w, y0: y1 - h, y1, baseY: y1 }
-}
 
 /** Product placement for a single image: centered, lower-middle, ~55% of the width. */
 export function singleImageRegion(ratio: string): PlateRegion {
@@ -352,7 +336,7 @@ export async function generateExactProductImage(input: ExactImageInput): Promise
   const cutouts = await prepareProductCutouts({ photos: input.photos, format: 'offer_graphic', language: input.language, withParts: false, gateway: input.gateway, cache: input.cache, load: input.load })
   if (!cutouts.ok) return { ok: false, error: cutouts.error, costUsd, warnings: cutouts.warnings }
   warnings.push(...cutouts.warnings)
-  const region = input.region ? fallbackRegion(input.region) : singleImageRegion(input.ratio)
+  const region = singleImageRegion(input.ratio)
   const light: LightDirection = plateLight(input.variation ?? 0)
   const surface = plateSurface('offer_graphic', input.variation ?? 0)
   const dna = minimalDna(input)
@@ -436,15 +420,17 @@ export async function generateExactProductImage(input: ExactImageInput): Promise
 export type ToolProductFidelity = 'exact' | 'generated'
 
 /**
- * `productFidelity` for single-image tools: default 'generated' (the web-app Grok flow with PRODUCT LOCK);
- * 'exact' (real-pixel cutout composite) is opt-in. Exact without a photo is an input error.
+ * `productFidelity` for single-image tools: default 'generated' (the web-app Grok flow: the model designs the whole ad with the real
+ * photos as PRODUCT LOCK refs); 'exact' (real-pixel cutout composite on a generated plate) is an explicit opt-in. Exact without a photo
+ * is an input error.
+ * 0.26.0: for printed packs / pouches / boxes (`pack`) productFidelity is DEPRECATED and IGNORED — there is no paid exact-vs-generated
+ * choice: the model designs the ad and the real pack pixels are swapped in deterministically (api/lib/mcp/pack-swap.ts), no extra charge.
  */
-export function resolveToolProductFidelity(raw: unknown, hasProductRef: boolean, opts: { /** Round 9 (MCP): printed packs / pouches default to the real-pixel path. */ defaultExact?: boolean } = {}): ToolProductFidelity {
+export function resolveToolProductFidelity(raw: unknown, hasProductRef: boolean, opts: { pack?: boolean } = {}): ToolProductFidelity {
   if (raw !== undefined && raw !== null && raw !== 'exact' && raw !== 'generated') throw new Error('productFidelity must be "exact" or "generated"')
+  if (opts.pack) return 'generated'
   if (raw === 'exact' && !hasProductRef) throw new Error('productFidelity "exact" needs a product photo (productImageId / product reference).')
   if (raw === 'exact') return 'exact'
-  if ((raw === undefined || raw === null) && opts.defaultExact && hasProductRef) return 'exact'
-  // Web-app path by default (Grok /edits + PRODUCT LOCK); 'exact' (cutout composite) is opt-in only.
   return 'generated'
 }
 

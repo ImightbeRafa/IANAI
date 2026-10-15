@@ -25,9 +25,6 @@ RUN npm run build && npm run build:api
 FROM node:22-slim@sha256:c3de60bf2f9dd0ac6370e6117950ff62d6e339527e7472301c9c78a017978392 AS runtime
 WORKDIR /app
 ENV NODE_ENV=production PORT=8080 HOST=0.0.0.0 NODE_OPTIONS=--enable-source-maps ADVANCE_RUNTIME=cloudflare-container
-# Round 9 (MCP 0.22.0): free local OCR for the printed-pack text check (api/lib/mcp/pack-ocr.ts). Missing binary = check reports 'unavailable'.
-RUN apt-get update && apt-get install -y --no-install-recommends tesseract-ocr tesseract-ocr-eng tesseract-ocr-spa \
- && rm -rf /var/lib/apt/lists/* && tesseract --version | head -1
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev && npm cache clean --force \
  && node -e "const s=require('sharp');console.log('sharp ok',s.versions.vips)" \

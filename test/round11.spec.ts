@@ -2,26 +2,23 @@
  * Round 11 (MCP 0.24.0):
  *  1. mask coverage: the PH pouch's white top (light part on a light backdrop) is repaired, fidelity is measured vs the PHOTO
  *  2. clear sheet film kept around a patch grid
- *  3. pack OCR reads tiles: SP r9 small print "ingecdicates" fails
- *  4. low-fidelity fallback constant, quote resolves productFidelity, role clipped to the DB limit (60)
+ *  3. (0.26.0: pack OCR, the low-fidelity forced retry and the exact fallback were removed)
+ *  4. quote resolves productFidelity (packs: always generated), role clipped to the DB limit (60)
  */
 import { readFileSync } from 'node:fs'
 import { describe, expect, it, vi } from 'vitest'
 import { segmentProduct } from '../api/lib/adpack/fidelity/segment'
 import { sheetFilm, FILM_ALPHA } from '../api/lib/adpack/fidelity/sheet-film'
 import { PHOTO_IOU_REJECT, MASK_MISSED_MAX } from '../api/lib/adpack/fidelity/mask-coverage'
-import { checkPackText, ocrAvailable } from '../api/lib/mcp/pack-ocr'
-import { FIDELITY_FALLBACK_BELOW } from '../api/lib/mcp/web-image'
 import { resolveQuotedProductFidelity } from '../api/lib/mcp/execute-tools'
 import { clipWithNotice, ROLE_DB_MAX } from '../api/lib/mcp/text-limits'
 import { MCP_VERSION } from '../api/lib/mcp/server-info'
 
 vi.setConfig({ testTimeout: 90_000 })
 const F11 = (n: string) => readFileSync(new URL(`./fixtures/round11/${n}`, import.meta.url))
-const F10 = (n: string) => readFileSync(new URL(`./fixtures/round10/${n}`, import.meta.url))
 
 describe('round 11 — 0.24.0', () => {
-  it('version', () => { expect(MCP_VERSION).toBe('0.25.0') })
+  it('version', () => { expect(MCP_VERSION).toBe('0.26.0') })
 
   it('PH energy pouch: the flood mask missed the white top → repaired, full pouch (IoU vs the photo ≥ 0.97)', async () => {
     const r = await segmentProduct({ bytes: F11('ph-energy.jpg'), role: 'front' as never })
@@ -57,21 +54,13 @@ describe('round 11 — 0.24.0', () => {
     expect(sheetFilm(blob, w, h)).toBeNull()
   })
 
-  it('pack OCR tiles: the SP r9 small print "ingecdicates" fails', async () => {
-    if (!(await ocrAvailable())) { console.warn('tesseract not installed: OCR test skipped'); return }
-    const r = await checkPackText({ reference: F11('sp-sleep02.jpg'), generated: F10('sp-scene-r9.jpg'), generatedBox: { x0: 0.12, y0: 0.38, x1: 0.6, y1: 0.95 } })
-    expect(r.status).toBe('fail')
-    if (r.status === 'fail') expect(r.misspelled.map((m) => m.found).join(' ')).toMatch(/ingecdicates/)
-  })
-
-  it('fidelity fallback threshold is 0.7', () => { expect(FIDELITY_FALLBACK_BELOW).toBe(0.7) })
-
-  it('the quote binds the RESOLVED productFidelity (pack + photo → exact; explicit wins; box role → generated)', () => {
+  it('the quote binds the RESOLVED productFidelity (0.26.0: a pack is always generated — productFidelity ignored; otherwise explicit wins)', () => {
     const ctx = { offers: [{ id: 'o1', name: 'Energy Patches', type: 'producto', productDescription: 'sobre / bolsa de parches', technicalSpecs: null }] }
-    const assets = [{ id: 'i1', imageUrl: 'u', tags: ['role:front'], isPrimary: true, label: 'frente' }] as never
-    expect(resolveQuotedProductFidelity({ ctx, offerId: 'o1', productAssets: assets })).toBe('exact')
-    expect(resolveQuotedProductFidelity({ explicit: 'generated', ctx, offerId: 'o1', productAssets: assets })).toBe('generated')
-    expect(resolveQuotedProductFidelity({ ctx, offerId: 'o1', productAssets: [] })).toBe('generated')
+    expect(resolveQuotedProductFidelity({ ctx, offerId: 'o1' })).toBe('generated')
+    expect(resolveQuotedProductFidelity({ explicit: 'exact', ctx, offerId: 'o1' })).toBe('generated')
+    const plane = { offers: [{ id: 'o2', name: 'Avión de papel DIY', type: 'producto', productDescription: 'kit con motores', technicalSpecs: null }] }
+    expect(resolveQuotedProductFidelity({ explicit: 'exact', ctx: plane, offerId: 'o2' })).toBe('exact')
+    expect(resolveQuotedProductFidelity({ ctx: plane, offerId: 'o2' })).toBe('generated')
   })
 
   it('role is clipped to the DB limit (product_images_role_len = 60) with a notice', () => {

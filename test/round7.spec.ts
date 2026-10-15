@@ -248,8 +248,8 @@ describe('prompt (MCP path): natural full-bleed scene, no strips, product low; p
     expect(parseWebPostArgs({}).productNotes).toBeUndefined()
   })
   it('MCP 0.20.0 advertises the new features', () => {
-    expect(MCP_VERSION).toBe('0.25.0')
-    for (const f of ['seam_blend_no_letterbox', 'text_never_over_product_make_room', 'severity_factors_retry', 'product_notes_input', 'exact_uses_code_layout']) expect(MCP_FEATURES).toContain(f as never)
+    expect(MCP_VERSION).toBe('0.26.0')
+    for (const f of ['seam_blend_no_letterbox', 'text_never_over_product_make_room', 'product_notes_input', 'exact_uses_code_layout']) expect(MCP_FEATURES).toContain(f as never)
   })
 })
 
@@ -274,22 +274,23 @@ describe('autoRetry with several issues: severity factors, the better result is 
     brandKit: { id: 'k1', name: 'Prototipo', primaryColor: '#15263E', secondaryColor: '#F1EDE5', accentColor: '#2EC4B6', logoUrl: durl(LOGO, 'image/png'), referenceImages: [] },
     brandKits: [], latestGuideIntake: null,
   } as never
-  const base = () => ({ apiKey: 'k', ctx, offerId: 'o1', aspectRatio: '4:5', productUrls: [durl(F7('hero998.jpg')), durl(F6('side.jpg'))], autoRetry: true, lock: { allowedProps: [], forbidExtraProps: true } as never })
+  const base = () => ({ apiKey: 'k', ctx, offerId: 'o1', aspectRatio: '4:5', productUrls: [durl(F7('hero998.jpg')), durl(F6('side.jpg'))], autoRetry: true, lock: { allowedProps: [], forbidExtraProps: true } as never, compositeLayers: true })
   /** B asks for the real TOPGT box (allowedProps + its photo as an accessory reference) like Content's live run: the box gets LOCATED, so the text cannot sit on it. */
   const withBox = () => ({ ...base(), accessories: [{ imageUrl: durl(F6('box.jpg')), label: 'caja TOPGT real' }], lock: { allowedProps: ['caja TOPGT real', 'hoja de papel blanca'], forbidExtraProps: true } as never })
 
-  it('B (text over the box, text 58 %, fidelity 0.73) → severity counts ALL factors → ONE retry → the cleaner scene wins; one retry max', async () => {
+  it('B (text over the box, text 58 %) → severity counts the layout factors (0.26.0: never fidelity) → ONE retry → the cleaner scene wins; one retry max', async () => {
     scenes = [F7('scene-B.jpg'), F7('scene-B-regen.jpg')]
     const out = await generateWebStyleImage({ ...withBox(), copy: COPY_B })
     expect(calls).toBe(2)
     const ar = out.autoRetry
     expect(ar.attempted).toBe(true)
-    expect(ar.factors?.first).toMatchObject({ textOverProduct: 4, textScale: 3, fidelity: 4 })
-    expect(ar.firstSeverity!).toBeGreaterThanOrEqual(11)
+    expect(ar.factors?.first).toMatchObject({ textOverProduct: 4, textScale: 3 })
+    expect(ar.factors?.first.fidelity).toBeUndefined()
+    expect(ar.firstSeverity!).toBeGreaterThanOrEqual(7)
     expect(ar.retrySeverity!).toBeLessThan(ar.firstSeverity!)
     expect(ar.kept).toBe('retry')
-    expect(ar.reason).toMatch(/EMPEZAR por debajo del 38%/)
-    expect(ar.reason).toMatch(/EXACTAMENTE como en la foto/)
+    expect(ar.reason).toMatch(/fondo calmo y continuo/)
+    expect(ar.reason).not.toMatch(/EXACTAMENTE como en la foto/)
     expect(out.qa.textScale).toBeGreaterThanOrEqual(0.8)
     // Round 11: any overlap with a located object is reported (never silent) instead of passing as "calm"
     const t = out.compositeLayers?.text
@@ -305,17 +306,15 @@ describe('autoRetry with several issues: severity factors, the better result is 
       expect(out.autoRetry.retrySeverity!).toBeGreaterThan(out.autoRetry.firstSeverity!)
     } else expect(calls).toBe(1)
   }, 120_000)
-  it('fidelity < 0.75 alone (plane redrawn: A scene) raises the severity, triggers the one retry, and when it survives suggests productFidelity "exact" (never run automatically)', async () => {
+  it('0.26.0: a low fidelity (plane redrawn: A scene) is a WARNING only — never a severity factor, never a retry trigger, never an exact suggestion', async () => {
     scenes = [F7('scene-A.jpg')]
     const out = await generateWebStyleImage({ ...base(), copy: COPY_A })
     expect(out.fidelityCheck.status).toBe('warning')
     expect(out.fidelity_warning!.score).toBeLessThan(0.75)
-    expect(out.qa.severityFactors).toMatchObject({ fidelity: 4 })
-    expect(calls).toBe(2) // exactly ONE retry, no third call
-    expect(out.autoRetry.attempted).toBe(true)
-    expect(out.autoRetry.kept).toBe('first') // tie → keep the first (same price, no change)
-    expect(out.suggestedFallback?.productFidelity).toBe('exact')
-    expect(out.suggestedFallback?.reason).toMatch(/second paid generation/)
+    expect(out.qa.severityFactors?.fidelity).toBeUndefined()
+    expect(calls).toBeLessThanOrEqual(2) // never more than ONE retry
+    expect((out as unknown as { suggestedFallback?: unknown }).suggestedFallback).toBeUndefined()
+    expect((out as unknown as { fidelityFallback?: unknown }).fidelityFallback).toBeUndefined()
     expect(out.scenePrep?.seams.blended).toBe(true) // the strips were blended in code
     expect(out.qa.seams).toMatchObject({ found: 2, blended: true, remaining: 0 })
     expect(out.qa.status).toBe('warning')

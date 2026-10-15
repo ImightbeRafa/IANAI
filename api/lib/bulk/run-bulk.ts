@@ -2,9 +2,10 @@ import { randomUUID } from 'node:crypto'
 import { checkUsageLimit, incrementUsage } from '../auth.js'
 import { generationUuidFromApproval } from '../credits/generation-id.js'
 import { GROK_TEXT_MODEL } from '../grok-models.js'
-import { generateWebStyleImage, postCheckSummary } from '../mcp/web-image.js'
+import { generateWebStyleImage, postCheckSummary, type PaidCall } from '../mcp/web-image.js'
+import { isPackProduct } from '../mcp/product-kind.js'
 import { resolveImageRatio } from '../image-ratios.js'
-import { createModelGateway } from '../adpack/gateway.js'
+import { createModelGateway, withCostLedger } from '../adpack/gateway.js'
 import { exactResultDataUrl, generateExactProductImage, photosFromUrls, resolveToolProductFidelity } from '../adpack/fidelity/pipeline.js'
 import type { ModelGateway } from '../adpack/types.js'
 import { logApiUsage, estimateTokens } from '../usage-logger.js'
@@ -53,7 +54,7 @@ export type BulkRunContext = {
   recentSummaries?: string[]
   styleDnas?: StyleDna[]
   /**
-   * 'exact' (default when product refs exist): real product pixels composited into a generated
+   * 'generated' (default): the model designs the ad from the refs; 'exact' (explicit opt-in, never for printed packs): real product pixels composited into a generated
    * scene (fidelity-scored); 'generated': the image model redraws the product from the refs.
    */
   productFidelity?: 'exact' | 'generated'
@@ -261,7 +262,9 @@ export async function runBulkPosts(options: {
         runtime.ctx.brandKit?.logoUrl || '',
       ].filter(Boolean)
 
-  const fidelityMode = resolveToolProductFidelity(runtime.productFidelity, productRefs.length > 0)
+  // 0.26.0: printed packs ignore productFidelity (model-designed ad + real-pixel swap inside generateWebStyleImage).
+  const pack = isPackProduct([offer?.name, offer?.type, offer?.productDescription, offer?.technicalSpecs])
+  const fidelityMode = resolveToolProductFidelity(runtime.productFidelity, productRefs.length > 0, { pack })
   // Every supported ratio works (4:5 → nearest native + reframe).
   const ratioPlan = resolveImageRatio(runtime.aspectRatio || '9:16')
   let fidelityGateway: ModelGateway | null = runtime.fidelityGateway ?? null
@@ -307,11 +310,13 @@ export async function runBulkPosts(options: {
       let generated: { imageDataUrl: string; providerModel: string; estimatedCostUsd: number; resolution: string; quality: string; mode: string; lockApplied: boolean }
       let fidelity: BulkPostItem['fidelity']
       let postCheck: Record<string, unknown> | null = null
+      let paidCalls: PaidCall[] = []
       if (fidelityMode === 'exact') {
         // Real product pixels (A1): the plate model never sees the product; no redrawn SKU is delivered.
         fidelityGateway ??= createModelGateway()
+        const ledgered = withCostLedger(fidelityGateway)
         const exact = await generateExactProductImage({
-          gateway: fidelityGateway,
+          gateway: ledgered,
           photos: photosFromUrls(rotatedProduct.length ? [...rotatedProduct, ...productRefs] : productRefs),
           ratio: ratioPlan.requested,
           brandName: runtime.ctx.brand.name,
@@ -323,6 +328,7 @@ export async function runBulkPosts(options: {
           ...(runtime.relight === 'ai' ? { relight: 'ai' as const } : {}),
           variation: absoluteIndex,
         })
+        paidCalls = ledgered.ledger.filter((e) => e.costUsd > 0).map((e) => ({ purpose: e.kind === 'segment' ? 'segment' as const : 'generate' as const, provider: e.kind === 'segment' || e.kind === 'visionJson' ? 'gemini' as const : 'xai' as const, model: e.model, costUsd: e.costUsd }))
         if (!exact.ok) throw new Error(exact.error)
         fidelity = { score: exact.fidelity.score, passed: exact.fidelity.passed, method: exact.fidelity.method, ssim: exact.fidelity.ssim, deltaE: exact.fidelity.deltaE, silhouetteIoU: typeof exact.cutout.photoIoU === 'number' ? exact.cutout.photoIoU : exact.score.silhouetteIoU, silhouetteVs: typeof exact.cutout.photoIoU === 'number' ? 'photo' : 'cutout', cutoutIoU: exact.score.silhouetteIoU, ...(exact.cutout.maskRepaired ? { maskRepaired: true } : {}), hueShift: exact.score.hueShift }
         generated = { imageDataUrl: exactResultDataUrl(exact), providerModel: exact.plateModel || imageModel, estimatedCostUsd: exact.costUsd, resolution: `${exact.width}x${exact.height}`, quality: 'medium', mode: 'exact_composite', lockApplied: true }
@@ -347,6 +353,7 @@ export async function runBulkPosts(options: {
           supportUrls: supportRefs.slice(0, 3),
         })
         generated = web.generated
+        paidCalls = web.paidCalls
         postCheck = postCheckSummary(web)
         void prompt
       }
@@ -372,24 +379,29 @@ export async function runBulkPosts(options: {
           ...(postCheck?.fidelity_warning ? { fidelity_warning: postCheck.fidelity_warning } : {}),
         },
       })
-      await logApiUsage({
-        userId: runtime.user.id,
-        userEmail: runtime.user.email || undefined,
-        feature: 'image',
-        model: generated.providerModel,
-        success: true,
-        costOverrideUsd: generated.estimatedCostUsd,
-        generationId,
-        source: runtime.source,
-        metadata: {
-          action: 'bulk_post',
-          packId,
-          angleId: angle.id,
-          approach,
-          grokMode: generated.mode,
-          lockApplied: generated.lockApplied,
-        },
-      })
+      // One usage row per paid provider call, each with its own cost (0.26.0).
+      const calls: PaidCall[] = paidCalls.length ? paidCalls : [{ purpose: 'generate', provider: 'xai', model: generated.providerModel, costUsd: generated.estimatedCostUsd }]
+      for (let c = 0; c < calls.length; c++) {
+        await logApiUsage({
+          userId: runtime.user.id,
+          userEmail: runtime.user.email || undefined,
+          feature: 'image',
+          model: calls[c].model,
+          success: true,
+          costOverrideUsd: calls[c].costUsd,
+          generationId,
+          source: runtime.source,
+          metadata: {
+            action: 'bulk_post',
+            packId,
+            angleId: angle.id,
+            approach,
+            grokMode: generated.mode,
+            lockApplied: generated.lockApplied,
+            paidCall: { index: c + 1, of: calls.length, purpose: calls[c].purpose, provider: calls[c].provider },
+          },
+        })
+      }
       try {
         const incrementResult = await incrementUsage(runtime.user.id, 'image', {
           generationId,

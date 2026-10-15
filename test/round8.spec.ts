@@ -131,7 +131,7 @@ describe('generateWebStyleImage on the Sleeping Patches scene (mock xAI)', () =>
     brandKit: { id: 'k1', name: 'Sleeping Patches', primaryColor: '#0D1845', secondaryColor: '#2C3E9E', accentColor: '#F5C842', logoUrl: durl(LOGO, 'image/png'), referenceImages: [], forbiddenPhrases: ['sin efectos secundarios', 'directo al torrente sanguíneo', '₡12.900'], ...kitOver },
     brandKits: [], latestGuideIntake: null,
   }) as never
-  const base = () => ({ apiKey: 'k', offerId: 'o1', aspectRatio: '4:5', productUrls: [durl(F8('pouch-ref.jpg'))], lock: { allowedProps: ['mesita de noche de madera', 'ropa de cama'], forbidExtraProps: true } as never })
+  const base = () => ({ apiKey: 'k', offerId: 'o1', aspectRatio: '4:5', productUrls: [durl(F8('pouch-ref.jpg'))], lock: { allowedProps: ['mesita de noche de madera', 'ropa de cama'], forbidExtraProps: true } as never, compositeLayers: true })
 
   it('(a) Content\'s exact call (compositeLayers on + enforceSafeZones:true): the picture is NEVER shrunk or framed, same pixel size, a warning says the flag was ignored', async () => {
     scenes = [F8('sleeping-scene.jpg')]
@@ -261,5 +261,5 @@ describe('units: claims filter, product kind, logo check, prompt wording', () =>
     expect(en).toMatch(/every part, colour, material and proportion of the product exactly as in the reference photo/)
     expect(en).not.toMatch(/wheels|landing gear|propellers|flaps|controller/)
   })
-  it('MCP 0.25.0', () => expect(MCP_VERSION).toBe('0.25.0'))
+  it('MCP 0.26.0', () => expect(MCP_VERSION).toBe('0.26.0'))
 })

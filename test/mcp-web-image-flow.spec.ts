@@ -75,7 +75,7 @@ async function setup() {
   return { db, artifactStore, saved }
 }
 
-/** Rounds 1-5 assert the legacy flow (Grok draws logo + CTA): compositeLayers:false unless a test says otherwise (round 5b tests below). */
+/** 0.26.0: the default flow = the model designs the whole ad (logo as a reference, copy rendered in-image). compositeLayers:true is the opt-in (round 5b tests below). */
 async function runJob(args0: Record<string, unknown>, offerStore?: unknown) {
   const args = { compositeLayers: false, ...args0 }
   const { db, artifactStore, saved } = await setup()
@@ -105,14 +105,14 @@ beforeEach(async () => {
 afterEach(() => { vi.unstubAllGlobals() })
 
 describe('execute_image_generate = web flow by default', () => {
-  it('faithful product: web prompt + both photos + kit ref + logo in ONE xAI call, no fidelity_warning, credits unchanged', async () => {
+  it('faithful product: web prompt + both photos + logo in ONE xAI call (0.26.0: never the kit reference images), no fidelity_warning, credits unchanged', async () => {
     generated = await png(600, 800, 'scene', rects(placed(PRODUCT)), 'jpeg')
     const { status, saved } = await runJob({ copy: 'Papel arriba. Motores abajo.', textDensity: 'hard', immutableAttributes: ['hélices rojas'] })
     expect(xai).toHaveLength(1)
     expect(xai[0].url).toContain('/images/edits')
     expect(xai[0].body.aspect_ratio).toBe('3:4')
-    // p2 is a real accessory photo (label "part"): it gets its own slot (MCP budget 5): hero + accessory + kit ref + logo
-    expect(xai[0].body.images).toHaveLength(4)
+    // p2 is a real accessory photo (label "part"): it gets its own slot (MCP budget 5): hero + accessory + logo — the kit's referenceImages are NOT appended
+    expect(xai[0].body.images).toHaveLength(3)
     const prompt = String(xai[0].body.prompt)
     expect(prompt).toContain('Papel arriba. Motores abajo.')
     expect(prompt).toContain('₡14.900')
@@ -419,7 +419,7 @@ describe('round 5: deterministic safe zones, echoed args, caption, accessory ref
     const approvalStore = createMemoryMcpApprovalStore()
     const r = await mcpExecuteImageGenerate({ db, approvalStore, artifactStore, user: { id: 'u1' }, args: { brandId: 'b1', offerId: 'o1', scene: 'Gimnasio', referenceImageIds: ['p1'], productImageId: 'p1' } })
     const rec = await approvalStore.findById(String(r.approvalRequestId))
-    expect(rec?.inputJson).toMatchObject({ layoutCap: true, autoRetry: false, enforceSafeZones: false, compositeLayers: true, allowedProps: [], productFidelity: 'generated', scene: 'Gimnasio' })
+    expect(rec?.inputJson).toMatchObject({ layoutCap: true, autoRetry: false, enforceSafeZones: false, compositeLayers: false, stampLogo: false, stampPrice: false, allowedProps: [], productFidelity: 'generated', scene: 'Gimnasio' })
     const r2 = await mcpExecuteImageGenerate({ db, approvalStore, artifactStore, user: { id: 'u1' }, args: { brandId: 'b1', offerId: 'o1', layoutCap: false, autoRetry: true, enforceSafeZones: false, allowedProps: ['caja'], referenceImageIds: ['p1'], productImageId: 'p1' } })
     const rec2 = await approvalStore.findById(String(r2.approvalRequestId))
     expect(rec2?.inputJson).toMatchObject({ layoutCap: false, autoRetry: true, enforceSafeZones: false, allowedProps: ['caja'] })
@@ -438,7 +438,7 @@ describe('round 5: deterministic safe zones, echoed args, caption, accessory ref
   })
 })
 
-describe('round 5b: logo + CTA composited in code (default); the model draws neither', () => {
+describe('round 5b: logo + CTA composited in code (compositeLayers:true opt-in since 0.26.0); the model draws neither', () => {
   const KIT_LOGO = readFileSync(new URL('./fixtures/round5b/kit-logo-prototipo.png', import.meta.url))
   const KIT_LOGO_URL = `data:image/png;base64,${KIT_LOGO.toString('base64')}`
   const COPY = 'El plan de sábado\n₡14.900\nEnvío gratis llevando 2 kits\nEscribinos por DM'
@@ -458,7 +458,7 @@ describe('round 5b: logo + CTA composited in code (default); the model draws nei
   }
   const runC = (args: Record<string, unknown>) => runJob({ compositeLayers: true, ...args })
 
-  it('default flow: the prompt forbids logo + buttons and frees the bands; the logo is NOT sent as a reference; the saved image has the real logo + the exact CTA, same size', async () => {
+  it('opt-in flow: the prompt forbids logo + buttons and frees the bands; the logo is NOT sent as a reference; the saved image has the real logo + the exact CTA, same size', async () => {
     logoOverride = KIT_LOGO_URL
     sequence([await scene()])
     const { status, saved } = await runC({ copy: COPY })
@@ -470,10 +470,10 @@ describe('round 5b: logo + CTA composited in code (default); the model draws nei
     expect(prompt).toContain('el 18% superior ni en el 16% inferior')
     expect(prompt).not.toContain('Escribinos por DM') // the CTA text is for the compositor only
     expect(prompt).not.toContain('El plan de sábado') // round 6: the headline is not given to the image model either
-    // references: hero + accessory + kit ref (the logo is not sent: the model would redraw it)
+    // references: hero + accessory (the logo is not sent: the model would redraw it; the kit refs are never appended)
     const imgs = JSON.stringify(xai[0].body.images)
     expect(imgs).not.toContain(KIT_LOGO.subarray(60, 120).toString('base64').slice(0, 24))
-    expect(xai[0].body.images).toHaveLength(3)
+    expect(xai[0].body.images).toHaveLength(2)
     expect(status.status).toBe('completed')
     const layers = status.compositeLayers as { logo: { status: string; box: { y: number; h: number } }; cta: { status: string; text: string; box: { y: number; h: number } }; height: number; width: number }
     expect(layers.logo.status).toBe('drawn')
@@ -505,7 +505,7 @@ describe('round 5b: logo + CTA composited in code (default); the model draws nei
 
   it('autoRetry: headline inside the bands → ONE corrective regeneration (hint names the bands), the better image is kept, ONE charge; no scale-in needed', async () => {
     logoOverride = KIT_LOGO_URL
-    sequence([await scene(40), await scene(560)])
+    sequence([await scene(130), await scene(560)])
     vi.mocked(incrementUsage).mockClear()
     const { status } = await runC({ copy: COPY, autoRetry: true })
     expect(xai).toHaveLength(2)
@@ -522,7 +522,7 @@ describe('round 5b: logo + CTA composited in code (default); the model draws nei
 
   it('round 6: NEVER scales in by default — text left in the bands is reported (round 8: warning, not a fail trigger), the picture keeps its full-bleed size; scale-in is explicit opt-in and is a defect too', async () => {
     logoOverride = KIT_LOGO_URL
-    sequence([await scene(40), await scene(40)])
+    sequence([await scene(130), await scene(130)])
     const { status, saved } = await runC({ copy: COPY, autoRetry: true })
     expect(xai).toHaveLength(2)
     expect(status.safeZoneFix).toBeUndefined() // no shrink, no frame, no padding
@@ -563,12 +563,12 @@ describe('round 5b: logo + CTA composited in code (default); the model draws nei
     expect(status.safeZoneFix).toBeUndefined()
   })
 
-  it('compositeLayers is echoed with its effective default and can be turned off (legacy: the model draws logo + CTA)', async () => {
+  it('compositeLayers is echoed with its effective default (false since 0.26.0) and can be turned on (opt-in)', async () => {
     const { db, artifactStore } = await setup()
     const approvalStore = createMemoryMcpApprovalStore()
     const r = await mcpExecuteImageGenerate({ db, approvalStore, artifactStore, user: { id: 'u1' }, args: { brandId: 'b1', offerId: 'o1', referenceImageIds: ['p1'], productImageId: 'p1' } })
-    expect((await approvalStore.findById(String(r.approvalRequestId)))?.inputJson).toMatchObject({ compositeLayers: true })
-    const r2 = await mcpExecuteImageGenerate({ db, approvalStore, artifactStore, user: { id: 'u1' }, args: { brandId: 'b1', offerId: 'o1', compositeLayers: false, referenceImageIds: ['p1'], productImageId: 'p1' } })
-    expect((await approvalStore.findById(String(r2.approvalRequestId)))?.inputJson).toMatchObject({ compositeLayers: false })
+    expect((await approvalStore.findById(String(r.approvalRequestId)))?.inputJson).toMatchObject({ compositeLayers: false })
+    const r2 = await mcpExecuteImageGenerate({ db, approvalStore, artifactStore, user: { id: 'u1' }, args: { brandId: 'b1', offerId: 'o1', compositeLayers: true, referenceImageIds: ['p1'], productImageId: 'p1' } })
+    expect((await approvalStore.findById(String(r2.approvalRequestId)))?.inputJson).toMatchObject({ compositeLayers: true })
   })
 })

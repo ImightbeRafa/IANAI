@@ -6,6 +6,8 @@
  * draws the copy (headline / one price line / one facts line / ONE CTA), the kit logo and safe-zone margins over it → the
  * same free QA (safe zones, text, separators, extra-CTA risk) + halo / edge-roughness flags. Warning only: nothing here
  * blocks a delivered image, retries a paid call or changes credits.
+ * 0.26.0: explicit opt-in only (never an automatic fallback from "generated"), and never for printed packs (those always take the
+ * model-designed ad + the real-pixel swap, api/lib/mcp/pack-swap.ts).
  */
 import { LEFTOVER_BG_MAX } from '../adpack/fidelity/mask-coverage.js'
 import { scrubCopy, uniqueClaims } from './claims-filter.js'
@@ -20,7 +22,6 @@ import { qaSeverity, runMcpImageQa, tidyCopySeparators, type McpImageQa } from '
 import { prepareAndLayout } from './compose-scene.js'
 import { splitCopyBlocks } from './layout-ad.js'
 import { freeBands } from './safe-zones.js'
-import { CAPACITY_ERROR_RE, withProviderRetry } from './provider-retry.js'
 import type { McpBrandContext } from './user-tools.js'
 
 export type ExactAdOutput = {
@@ -73,15 +74,11 @@ export async function generateExactWebStyleAd(input: {
   /** Test seam: replaces the paid plate + composite call. */
   exactRunner?: (i: ExactImageInput) => Promise<ExactImageResult>
 }): Promise<ExactAdOutput> {
+  // 0.26.0: ONE run. The whole paid pipeline (plates + plate checks) is never re-run by a provider retry — provider retries live on
+  // single HTTP calls only — and the caller logs every paid call from the gateway ledger.
   const run = input.exactRunner ?? generateExactProductImage
-  const { value: exact, trace } = await withProviderRetry(async () => {
-    const res = await run(input.exact)
-    if (!res.ok) {
-      const detail = [res.error, ...res.warnings].join(' | ')
-      throw Object.assign(new Error(CAPACITY_ERROR_RE.test(detail) ? `provider: ${detail.slice(0, 240)}` : res.error), {})
-    }
-    return res
-  })
+  const exact = await run(input.exact)
+  if (!exact.ok) throw new Error(exact.error)
 
   const offer = input.ctx.offers.find((o) => o.id === input.offerId)
   const kit = input.ctx.brandKit
@@ -187,6 +184,6 @@ export async function generateExactWebStyleAd(input: {
     layout: { textOverProduct: report.text.textOverProduct === true, allTextFits: report.text.fits && report.layout.overlaps.length === 0, logo: report.logo.status === 'drawn' ? 'drawn' : 'none' },
     compositeLayers: report,
     warnings,
-    providerRetries: trace.retries.length,
+    providerRetries: 0,
   }
 }

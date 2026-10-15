@@ -522,8 +522,6 @@ export type McpImageQa = {
   sceneButtonLike?: number
   /** Round 8: the CTA covers the located product / accessory (no free slot, could not make room). */
   ctaBlocked?: boolean
-  /** Round 9: OCR check of the printing on the product (tesseract). */
-  packText?: { status: string; engine: string; score?: number; misspelled?: string[] }
   /** Round 7: type scale the layout had to use (1 = nominal) — below 0.8 is always warned, below 0.75 raises the severity. */
   textScale?: number
   /** Round 7: the factors that make up `severity` beyond the base QA (seam, text over product, text scale, fidelity < 0.75, props, CTA on a seam). */

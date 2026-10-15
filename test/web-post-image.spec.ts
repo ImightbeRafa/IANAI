@@ -165,12 +165,13 @@ describe('runWebPostGrokImage (mocked xAI)', () => {
     expect(out.lockApplied).toBe(false)
   })
 
-  it('auto-appends brand-kit reference photos as product refs (2+ photos, 4 slots max)', async () => {
+  it('0.26.0: confirmed product photos only — the kit reference images are never appended (no kitReferenceUrls option)', async () => {
     mockXai()
-    const out = await runWebPostGrokImage({ ...base, productUrls: [ref(1)], logoUrl: null, kitReferenceUrls: [ref(8), ref(9), ref(10), ref(11)] })
-    expect(out.referenceCount).toBe(3) // 1 confirmed + 3 kit, then the 3-ref budget
-    expect(calls[0].body.images).toHaveLength(3)
-    expect(out.productReferenceDataUrls.length).toBe(4)
+    const out = await runWebPostGrokImage({ ...base, productUrls: [ref(1)], logoUrl: null, ...({ kitReferenceUrls: [ref(8), ref(9)] } as object) } as never)
+    expect(out.referenceCount).toBe(1)
+    expect(calls[0].body.image).toBeDefined()
+    expect(out.productReferenceDataUrls.length).toBe(1)
+    expect(out.referencesUsed).toEqual(['product'])
   })
 
   it('retries once with the aggressive clamp when Grok rejects the prompt length', async () => {
@@ -204,7 +205,7 @@ describe('MCP defaults and inputs', () => {
 
   it('parseWebPostArgs validates copy/density/style/cta/lock', () => {
     expect(parseWebPostArgs({ copy: ' Hola ', textDensity: 'medium', postStyle: 'anuncio-conversion', ctaStrength: 'soft', immutableAttributes: ['a', ' b '], lockProductAppearance: true }))
-      .toEqual({ copy: 'Hola', textDensity: 'medium', postStyle: 'anuncio-conversion', ctaStrength: 'soft', immutableAttributes: ['a', 'b'], lockProductAppearance: true, autoRetry: false, layoutCap: true, compositeLayers: true, enforceSafeZones: false })
+      .toEqual({ copy: 'Hola', textDensity: 'medium', postStyle: 'anuncio-conversion', ctaStrength: 'soft', immutableAttributes: ['a', 'b'], lockProductAppearance: true, autoRetry: false, layoutCap: true, compositeLayers: false, enforceSafeZones: false, stampLogo: false, stampPrice: false })
     expect(() => parseWebPostArgs({ textDensity: 'huge' })).toThrow()
     expect(() => parseWebPostArgs({ postStyle: 'x' })).toThrow()
   })

@@ -1,9 +1,9 @@
 /**
  * Round 12 (MCP 0.25.0):
  *  1. mask repair adds back only regions connected to the product; leftover backdrop pockets are cut (A plane)
- *  2. exact fallback: strict props in the plate prompt, the real product at the generated scene's located box
+ *  2. exact plate: strict props in the plate prompt
  *  3. CTA blocked → the picture shrinks down to 60 %
- *  4. asset role from the role column / tags / request text
+ *  4. asset role from the role column / tags / label (0.26.0: not from the request text)
  *  5. fidelity vs the photo survives the cut-out cache (PNG metadata), also for a flat lay (SP)
  *  6. the bundle offer line stays on the image; a framed badge logo is self-plated
  */
@@ -13,9 +13,8 @@ import { describe, expect, it, vi } from 'vitest'
 import { segmentProduct } from '../api/lib/adpack/fidelity/segment'
 import { LEFTOVER_BG_MAX, SPAN_FILL_MIN_MISSED } from '../api/lib/adpack/fidelity/mask-coverage'
 import { readCutoutMeta, writeCutoutMeta } from '../api/lib/adpack/fidelity/cutout-meta'
-import { inferAssetRole, roleFromRequestText } from '../api/lib/adpack/fidelity/photos'
+import { inferAssetRole } from '../api/lib/adpack/fidelity/photos'
 import { buildPlatePrompt } from '../api/lib/adpack/fidelity/plate'
-import { fallbackRegion } from '../api/lib/adpack/fidelity/pipeline'
 import { capCopyBlocks } from '../api/lib/mcp/copy-layout'
 import { EXTEND_CTA_MIN } from '../api/lib/mcp/compose-scene'
 import { layoutAdLayers, splitCopyBlocks } from '../api/lib/mcp/layout-ad'
@@ -26,7 +25,7 @@ const fx = (p: string) => readFileSync(new URL(`./fixtures/${p}`, import.meta.ur
 const dna = { version: 1, brandName: 'B', category: 'other', language: 'es', register: 'voseo', facts: [], visual: {}, gaps: [], sources: [] } as never
 
 describe('round 12 — 0.25.0', () => {
-  it('version', () => expect(MCP_VERSION).toBe('0.25.0'))
+  it('version', () => expect(MCP_VERSION).toBe('0.26.0'))
 
   it('A plane (frame product, light wall): no backdrop patches added between the legs; leftover backdrop ≤ 1.5 %', async () => {
     const r = await segmentProduct({ bytes: fx('round7/hero998.jpg'), role: 'front' as never })
@@ -63,15 +62,13 @@ describe('round 12 — 0.25.0', () => {
     expect(readCutoutMeta(png)).toBeNull()
   })
 
-  it('asset role: role column / free tags / label, and the request text for an untagged non-primary photo', () => {
+  it('asset role: role column / free tags / label (0.26.0: never from the request text)', () => {
     expect(inferAssetRole({ role: 'control negro tipo gamepad' })).toBe('part')
     expect(inferAssetRole({ tags: ['controller'] })).toBe('part')
     expect(inferAssetRole({ label: 'Mando' })).toBe('part')
     expect(inferAssetRole({ tags: ['caja'] })).toBe('box')
     expect(inferAssetRole({ isPrimary: true })).toBe('hero')
     expect(inferAssetRole({})).toBeUndefined()
-    expect(roleFromRequestText(['Control: gamepad negro PEQUENO… Caja TOPGT real'])).toBe('part')
-    expect(roleFromRequestText([undefined, 'La caja TOPGT de pie, el control delante'])).toBe('box')
   })
 
   it('exact plate with a strict lock: no plants / fabric as ambient props', () => {
@@ -81,14 +78,6 @@ describe('round 12 — 0.25.0', () => {
     expect(strict).not.toMatch(/: table, plants, fabric/)
     expect(strict).toMatch(/no plants/)
     expect(buildPlatePrompt(base)).toMatch(/plants/)
-  })
-
-  it('exact fallback region = the generated located box (≥ 30 % wide, base = ground line)', () => {
-    const r = fallbackRegion({ x0: 0.061, y0: 0.472, x1: 0.919, y1: 0.783 })
-    expect(r.x1 - r.x0).toBeCloseTo(0.858, 2)
-    expect(r.baseY).toBeCloseTo(0.783, 3)
-    const tiny = fallbackRegion({ x0: 0.45, y0: 0.6, x1: 0.5, y1: 0.65 })
-    expect(tiny.x1 - tiny.x0).toBeGreaterThanOrEqual(0.3)
   })
 
   it('the CTA may shrink the picture down to 60 %', () => expect(EXTEND_CTA_MIN).toBe(0.6))

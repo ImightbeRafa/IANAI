@@ -2,36 +2,40 @@
  * MCP ↔ web image bridge: one function that makes the MCP image tools call the same Grok post
  * flow as the web app (`api/lib/web-post-image.ts`), feeding it the brand kit, the offer and the
  * copy, then running the free local post-checks (fidelity_warning + safety-net QA).
- * Warning only: nothing here blocks a result, retries, or changes credits.
+ *
+ * 0.26.0 (docs/mcp-quality.md): by DEFAULT the model designs the WHOLE ad (scene, composition, typography, the copy rendered in-image)
+ * from the web brief, with the confirmed real product photos as /images/edits references (PRODUCT LOCK) and the kit logo as a
+ * reference — web parity. Code adds nothing by default: the real logo / price are stamped only on request (stampLogo / stampPrice)
+ * or when the logo cannot be a reference (vector file). Printed packs get their REAL pixels swapped into the located box (pack-swap.ts,
+ * deterministic). The fidelity check is a warning only. At most ONE regeneration, and only with an explicit autoRetry:true.
+ * compositeLayers:true is the explicit opt-in to the old scene-only + code-layout flow (layout-ad / compose-scene / scene-prep).
  */
 import { readOfferAdProfile } from '../adpack/offer-profile.js'
 import { roleFromImageRow, roleFromLabel, stripRolePrefix } from '../adpack/fidelity/photos.js'
+import { createModelGateway, withCostLedger } from '../adpack/gateway.js'
+import type { ModelGateway } from '../adpack/types.js'
 import { reframeToRatio, resolveImageRatio } from '../image-ratios.js'
 import type { ProductCreativeRow } from '../product-creative-rules.js'
-import { cleanBrandBlock, runWebPostGrokImage, type WebPostGrokImageResult } from '../web-post-image.js'
-import { buildCaption, capCopyBlocks, factRankOf, rankFacts } from './copy-layout.js'
+import { cleanBrandBlock, isAccessoryAttribute, runWebPostGrokImage, type WebPostGrokImageResult } from '../web-post-image.js'
+import { buildCaption, capCopyBlocks, factRankOf, PRICE_RE, rankFacts } from './copy-layout.js'
 import { findThinStructures, type SceneBlob } from './scene-objects.js'
 import { checkExtraObjects, findUnlistedObjects, labelMatchesAllowed, type ExtraObjectsFinding, type UnlistedObject } from './extra-objects.js'
 import { checkGeneratedProductFidelity, locateLogoBox, qaSeverity, runMcpImageQa, tidyCopySeparators, type FidelityCheckResult, type FidelityWarning, type McpImageQa } from './image-postcheck.js'
 import { enforceSafeZones, type SafeZoneFix } from './safe-zone-fix.js'
 import { scrubClaims, scrubCopy, uniqueClaims } from './claims-filter.js'
 import { isPackProduct, productKindOf } from './product-kind.js'
-import { checkPackText, type PackTextCheck } from './pack-ocr.js'
 import { loadAdLogo, logoIconCheck } from './logo-check.js'
 import { prepareAndLayout } from './compose-scene.js'
-import { splitCopyBlocks, type AdLayoutReport } from './layout-ad.js'
+import { layoutAdLayers, splitCopyBlocks, type AdLayoutReport } from './layout-ad.js'
 import { freeBands } from './safe-zones.js'
 import type { ScenePrepReport } from './compose-scene.js'
+import { swapRealPackPixels, type PackSwapReport } from './pack-swap.js'
 import { fetchPublicImageDetailed } from '../fetch-image-data-url.js'
 import type { McpBrandContext } from './user-tools.js'
 
-/** Round 7 thresholds. Text below 80 % of its nominal size is always warned; below 75 % (or on the product) it counts in the severity so the retry fires. */
+/** Round 7 thresholds (compositeLayers opt-in only). Text below 80 % of its nominal size is always warned; below 75 % (or on the product) it counts in the severity. */
 const TEXT_SCALE_WARN = 0.8
 const TEXT_SCALE_LOW = 0.75
-/** A hero-product fidelity score below this raises the severity (and triggers the one retry). */
-const FIDELITY_RETRY_BELOW = 0.75
-/** Round 11: a redrawn product (round 10 A: plane 0.57, extra fold, white propeller) → forced retry, then the caller falls back to productFidelity "exact". */
-export const FIDELITY_FALLBACK_BELOW = 0.7
 
 export type OfferLock = {
   lockProductAppearance?: boolean
@@ -58,7 +62,6 @@ export function offerLockFromRow(row: Record<string, unknown> | null | undefined
 }
 
 /** Round 9: same wording test as web-post-image lockRulesBlock (strict): an attribute naming a separate object (box, controller, cable …). */
-const ACCESSORY_ATTR_RE9 = /\b(caja|box|empaque|packaging|control|gamepad|mando|remote|cable|usb|cargador|charger|manual|estuche|bolsa|pouch)\b/i
 const words9 = (t: string) => new Set(t.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').split(/[^a-z0-9]+/).filter((w) => w.length >= 4))
 
 /**
@@ -68,7 +71,7 @@ const words9 = (t: string) => new Set(t.toLowerCase().normalize('NFD').replace(/
  *  - accessory attributes (box, controller, USB cable …) stay only when that object is attached as a real photo or IS the selected photo — never listed
  *    otherwise (even a "do not draw the blue USB cable" line made it appear).
  */
-export function scopeLockToPhotoRole(attrs: string[] | undefined, opts: { role?: string | null; photoLabel?: string | null; attachedLabels: string[] }): { attrs: string[]; dropped: string[] } {
+export function scopeLockToPhotoRole(attrs: string[] | undefined, opts: { role?: string | null; photoLabel?: string | null; attachedLabels: string[]; /** 0.26.0: printed pack offer — packaging attributes describe the product itself. */ packProduct?: boolean }): { attrs: string[]; dropped: string[] } {
   const list = (attrs || []).map((a) => a.trim()).filter(Boolean)
   const heroIsAccessory = Boolean(opts.role && ACCESSORY_ROLES.has(opts.role))
   const heroWords = words9(`${opts.photoLabel || ''}`)
@@ -77,7 +80,7 @@ export function scopeLockToPhotoRole(attrs: string[] | undefined, opts: { role?:
   const keep: string[] = []
   const dropped: string[] = []
   for (const a of list) {
-    const isAccessory = ACCESSORY_ATTR_RE9.test(a)
+    const isAccessory = isAccessoryAttribute(a, opts.packProduct)
     const isHero = heroWords.size > 0 && hits(a, heroWords)
     const isAttached = attachedWords.some((ws) => ws.size > 0 && hits(a, ws))
     let ok: boolean
@@ -145,9 +148,10 @@ export type WebStyleImageInput = {
   postStyle?: string
   textDensity?: string
   ctaStrength?: unknown
+  /** Confirmed product photos (resolved from the ids the user confirmed), hero first. Nothing else is ever added as a product ref. */
   productUrls: string[]
   supportUrls?: string[]
-  /** 'none' skips kit reference auto-append (web `referenceMode:'none'`). */
+  /** 'none' = no accessory photos either. */
   referenceMode?: 'use' | 'none'
   lock?: Partial<OfferLock>
   /** Real accessory photos (box / controller / contents) attached as extra references. */
@@ -157,50 +161,47 @@ export type WebStyleImageInput = {
   /** Round 9: label of the selected product photo (e.g. "Control remoto"): scopes the lock attributes to the object actually shown. */
   productPhotoLabel?: string | null
   /**
-   * Opt-in: when the safety-net QA fails (safe zones / missing text), regenerate ONCE with a corrective hint and
-   * keep the better image. Same job, same approval, same single credit charge — only our xAI cost doubles.
+   * Explicit opt-in only (default false): when the free QA finds a defect, regenerate ONCE with a corrective hint and keep the better
+   * image. Never more than one extra paid generation; it is disclosed in the approval and its provider cost is logged.
    */
   autoRetry?: boolean
   /** Default true: condense a long copy to headline + 1 price line + 1 facts line + 1 CTA; the rest comes back as `copyOverflow` for the caption. */
   layoutCap?: boolean
-  /**
-   * Legacy flow (compositeLayers:false) default true: if the QA finds the logo / CTA / text inside the Instagram UI margins, FIX it in code
-   * (scale the picture into a safe canvas of the same pixel size with edge-matched padding, re-stamp the real logo if it was clipped).
-   * Composite flow (default): NEVER by default — the layout places everything inside the safe zones, the picture is never shrunk or framed;
-   * only an explicit `true` allows this scale-in as a last resort, and the QA then reports it as a defect (never 'pass').
-   */
+  /** Legacy explicit opt-in (default false): scale the picture into a safe canvas when the QA finds text in the Instagram UI margins. */
   enforceSafeZones?: boolean
-  /** Real offer photos (box / contents / parts) NOT attached: when their object shows up in the scene without being in allowedProps it is flagged (warning only). */
+  /** Real offer photos (box / contents / parts) NOT attached: flagged when they show up in a compositeLayers scene (warning only). */
   libraryPhotos?: Array<{ imageUrl: string; label: string }>
   /**
-   * Default true (MCP rules on, round 6): Grok is asked for the SCENE ONLY (no text, logo or button; empty top / bottom bands). Afterwards the REAL
-   * kit logo, the headline, the price line, the facts line and ONE CTA with the exact `copy` text are composited in code inside the safe zones
-   * (brand fonts + colours, layout from the real text boxes, no overlaps, ≥ 1.5 % of the height between elements, text contrast ≥ 4.5:1, same pixel size,
-   * no shrink / frame). No logo asset → no logo (qa.logoUnavailable), never a text chip. false = the legacy flow where Grok draws all the text.
+   * Default FALSE (0.26.0): the model designs the whole ad. true = explicit opt-in to the scene-only flow (the model draws no text; the
+   * real logo, headline, price, facts and ONE CTA are composited in code — layout-ad / compose-scene / scene-prep).
    */
   compositeLayers?: boolean
-  /**
-   * Default true: MCP-only prompt rules (binding scene, strict lock / no invented props, safe zones, separator hygiene).
-   * false = the legacy web prompt (scene as factual context) — used by the web⇄MCP parity test to prove the shared
-   * builder is byte-identical to the web route.
-   */
+  /** Default true: MCP prompt rules (binding scene, strict lock / no invented props, safe-zone margins, one CTA). false = the legacy web prompt (parity test). */
   mcpRules?: boolean
-  /** Optional free text appended to the product lock (e.g. "propeller is light grey, wing is one smooth sheet"). Echoed in the tool args. */
+  /** Optional free text appended to the product lock (e.g. "propeller is light grey, wing is one smooth sheet"). */
   productNotes?: string
-  /** Default true: when the text would land on the product / shrink below 80 %, move the picture down by extending the background above it (no model call). */
+  /** compositeLayers opt-in only: when the text would land on the product, move the picture down by extending the background above it. */
   makeRoom?: boolean
+  /** Opt-in (default false): stamp the REAL kit logo in code (the logo is then not sent to the model). Automatic when the logo is a vector file. */
+  stampLogo?: boolean
+  /** Opt-in (default false): stamp the copy's price line in code (the model then does not draw it). */
+  stampPrice?: boolean
+  /** Test seam: segmentation gateway for the pack swap (default: the Gemini gateway, used only when the local flood fails). */
+  segmentGateway?: Pick<ModelGateway, 'segment'>
 }
 
+/** One paid provider call made for this image (logged one row each by the caller). */
+export type PaidCall = { purpose: 'generate' | 'auto_retry' | 'segment'; provider: 'xai' | 'gemini'; model: string; costUsd: number }
+
 export type WebStyleImageOutput = {
-  /** Round 9: raw scene of the kept attempt (before compositing). Never put into a tool result as bytes: the caller uploads it and returns the URL. */
+  /** Round 9: raw generation of the kept attempt (before any code layer). Never put into a tool result as bytes: the caller uploads it and returns the URL. */
   rawScene?: { imageDataUrl: string }
-  /** Round 9: printed-text OCR check of the generated product against the reference photo. */
-  packText?: PackTextCheck
   /** Round 9: offer lock attributes scoped to the selected photo's role (dropped = not sent to the model). */
   lockScope?: { role: string | null; kept: string[]; dropped: string[] }
   generated: {
     imageDataUrl: string
     providerModel: string
+    /** Sum of every paid call below. */
     estimatedCostUsd: number
     resolution: string
     quality: string
@@ -208,6 +209,8 @@ export type WebStyleImageOutput = {
     mode: string
     lockApplied: boolean
   }
+  /** Every paid call (first generation, the optional retry, a segmentation fallback) with its own cost. */
+  paidCalls: PaidCall[]
   prompt: string
   request: WebPostGrokImageResult['request']
   referenceCount: number
@@ -215,31 +218,32 @@ export type WebStyleImageOutput = {
   copySource: 'copy' | 'guidePrompt' | 'offer_default'
   /** Round 8: claims dropped from the offer text / copy (kit forbiddenPhrases + built-in regulated health claims). */
   removedClaims?: string[]
+  /** Warning only: never fails, retries or changes charges. */
   fidelityCheck: FidelityCheckResult
   fidelity_warning?: FidelityWarning
   qa: McpImageQa
-  autoRetry: { requested: boolean; attempted: boolean; /** Round 10: the retry ran although autoRetry was not requested, because the pack printing was misspelled. */ forcedBy?: 'packText' | 'fidelity'; reason?: string; kept?: 'first' | 'retry'; keptReason?: string; firstSeverity?: number; retrySeverity?: number; factors?: { first: Record<string, number>; retry: Record<string, number> }; firstQa?: { safeZones: McpImageQa['safeZones']; textPresent: McpImageQa['textPresent']; issues: string[] } }
+  autoRetry: { requested: boolean; attempted: boolean; reason?: string; kept?: 'first' | 'retry'; keptReason?: string; firstSeverity?: number; retrySeverity?: number; factors?: { first: Record<string, number>; retry: Record<string, number> }; firstQa?: { safeZones: McpImageQa['safeZones']; textPresent: McpImageQa['textPresent']; issues: string[] } }
   references: { used: WebPostGrokImageResult['referencesUsed']; warnings: WebPostGrokImageResult['referenceWarnings'] }
-  /** What was allowed in the scene. Local pixel detection of invented props is not available: prevented at the prompt/reference level. */
+  /** What was allowed in the scene. The local props heuristics run only on the compositeLayers opt-in. */
   propsPolicy: { forbidExtraProps: boolean; allowed: string[]; accessoryReferences: number; verifiedLocally: boolean; source: 'input' | 'none'; check?: ExtraObjectsFinding; unlisted?: Array<{ label: string; inliers: number }> }
-  /** Warning only: colours next to the product that no reference explains (possible invented props). */
+  /** Warning only (compositeLayers opt-in): colours next to the product that no reference explains (possible invented props). */
   props_warning?: { code: 'props_warning'; reason: string; clusters: ExtraObjectsFinding['clusters']; unlisted?: Array<{ label: string; inliers: number }> }
-  /** Round 7: what the free scene prep did (flat strips blended away, picture moved down to make room for the text). */
+  /** compositeLayers opt-in: what the free scene prep did. */
   scenePrep?: ScenePrepReport
-  /** Round 7: set when the fidelity warning survived (the one retry included): the real-pixels path is the way out. */
-  suggestedFallback?: { productFidelity: 'exact'; reason: string }
-  /** Round 11: the product fidelity stayed below FIDELITY_FALLBACK_BELOW after the retry → the MCP caller switches to the exact path. */
-  fidelityFallback?: { score: number; reason: string; productBox?: { x0: number; y0: number; x1: number; y1: number } }
+  /** Printed packs: the real pack pixels swapped into the located box (or why not). */
+  packSwap?: PackSwapReport
+  /** What code stamped on the model's ad on request (stampLogo / stampPrice / vector logo). */
+  stamped?: { logo: boolean; price?: string; reason: string }
   copyNormalised: string[]
   /** Copy lines moved off the image by the layout cap (put them in the caption). */
   copyOverflow: string[]
-  /** Transient provider failures retried inside the job (not an error, not charged). */
+  /** Transient provider failures retried inside the HTTP call (not an error, not charged). */
   providerRetries: number
-  /** Deterministic safe-zone fix applied to the kept image (absent when the image already passed or enforcement is off). */
+  /** Deterministic safe-zone fix applied to the kept image (legacy explicit enforceSafeZones:true only). */
   safeZoneFix?: SafeZoneFix
   /** The QA verdict of the image as Grok drew it, before the deterministic fix (only when a fix was applied). */
   qaBeforeFix?: { safeZones: McpImageQa['safeZones']; severity: number; issues: string[] }
-  /** Round 5b: what the code compositor drew (real logo, exact CTA, scrim) — absent on the legacy flow. */
+  /** compositeLayers opt-in: what the code compositor drew (real logo, exact CTA, scrim). */
   compositeLayers?: AdLayoutReport
   /** Ready-to-paste caption (es-CR, short): headline / price / facts + the lines moved off the image + the CTA. Deterministic. */
   caption: string
@@ -268,7 +272,7 @@ export function buildMcpBusinessContext(input: {
   ].filter(Boolean).join('. ').slice(0, 700)
 }
 
-/** Retry hint for the single QA auto-retry. */
+/** Retry hint for the single (explicit) QA auto-retry. */
 function retryHintFor(qa: McpImageQa, language: 'es' | 'en'): string {
   const es = language !== 'en'
   const bits: string[] = []
@@ -279,7 +283,7 @@ function retryHintFor(qa: McpImageQa, language: 'es' | 'en'): string {
   return bits.join('; ')
 }
 
-/** Retry hint for the composited (scene-only) flow: the only retry-worthy defects are text / objects in the free bands, drawn buttons / logos, separators. */
+/** Retry hint for the composited (scene-only, opt-in) flow. */
 function retryHintComposite(qa: McpImageQa, language: 'es' | 'en', ratio: string, kind: 'plane' | 'generic' = 'generic'): string {
   const es = language !== 'en'
   const bands = freeBands(ratio)
@@ -290,16 +294,8 @@ function retryHintComposite(qa: McpImageQa, language: 'es' | 'en', ratio: string
   if ((qa.sceneButtonLike ?? 0) > 0) bits.push(es ? 'se dibujó un botón o logo: NO dibujes botones, CTA ni logo (se agregan por código)' : 'a button or logo was drawn: do NOT draw buttons, CTAs or a logo (they are added in code)')
   const f = qa.severityFactors ?? {}
   if (f.seam) bits.push(es ? 'NO pintes franjas, barras ni bloques planos arriba o abajo (efecto letterbox): la pared y la mesa continúan hasta el borde de la imagen' : 'do NOT paint flat strips, bars or blocks at the top or bottom (letterbox look): the wall and the table run to the edge of the picture')
-  if (f.textOverProduct || f.textScale) bits.push(es ? 'el producto debe EMPEZAR por debajo del 38% desde arriba: dejá arriba un fondo calmo y continuo (sin objetos) para el titular; producto y objetos en el 60–65% inferior' : 'the product must START below 38% from the top: leave a calm, continuous, object-free background up top for the headline; product and objects in the lower 60–65%')
-  if (f.ctaBlocked) bits.push(es ? 'dejá el 16% inferior libre de producto y accesorios (control, caja): todo el producto debe terminar por encima del 82% desde arriba, con fondo calmo debajo' : 'keep the bottom 16% free of the product and accessories (controller, box): everything must end above 82% from the top, with calm background below')
-  if (f.fidelity) {
-    bits.push(kind === 'plane'
-      ? (es ? 'reproducí el producto EXACTAMENTE como en la foto de referencia: misma forma de ala, mismas piezas (ni aletas ni solapas de más), mismos colores y materiales de cada pieza, misma cantidad de ruedas y hélices' : 'reproduce the product EXACTLY as in the reference photo: same wing shape, same parts (no extra fins or tabs), same colour and material of every part, same number of wheels and propellers')
-      : (es ? 'reproducí el producto EXACTAMENTE como en la foto de referencia: misma forma, mismas piezas, mismos colores, materiales y proporciones, y lo impreso intacto (textos, logos, íconos)' : 'reproduce the product EXACTLY as in the reference photo: same shape, same parts, same colours, materials and proportions, and the print intact (text, logos, icons)'))
-  }
-  // Round 10: no room for the text / the CTA → ask for a SMALLER product (round 9 B: the hint only said "lower" and the retry was worse)
-  if (f.textScale || f.ctaBlocked || f.ctaSeam) bits.push(es ? 'mostrá el producto MÁS PEQUEÑO: que ocupe como máximo el 45% del ancho y el 40% del alto, centrado, con fondo calmo alrededor (espacio para el texto arriba y el botón abajo)' : 'show the product SMALLER: at most 45% of the width and 40% of the height, centred, with calm background around it (room for the text above and the button below)')
-  if (f.packText) bits.push(es ? 'el texto impreso del empaque salió con errores de ortografía: copiá letra por letra lo impreso en la foto de referencia (o dejá el texto chico ilegible antes que inventarlo)' : 'the printing on the pack came out misspelled: copy the printed text letter by letter from the reference photo (keep small print soft rather than inventing it)')
+  if (f.textOverProduct || f.textScale) bits.push(es ? 'dejá arriba un fondo calmo y continuo (sin objetos) para el titular' : 'leave a calm, continuous, object-free background up top for the headline')
+  if (f.ctaBlocked) bits.push(es ? 'dejá el borde inferior libre de producto y accesorios, con fondo calmo' : 'keep the bottom edge free of the product and accessories, with calm background')
   if (f.props) bits.push(kind === 'plane' ? (es ? 'sin objetos que no estén en las fotos de referencia ni en los extras permitidos (cables, cajas, controles, herramientas)' : 'no objects that are not in the reference photos or in the allowed extras (cables, boxes, controllers, tools)') : (es ? 'sin objetos que no estén en las fotos de referencia ni en los extras permitidos' : 'no objects that are not in the reference photos or the allowed extras'))
   if (qa.separatorLines.length) bits.push(es ? 'sin separadores sueltos al inicio o final de línea' : 'no dangling separators at the start or end of a line')
   return bits.join('; ')
@@ -307,7 +303,7 @@ function retryHintComposite(qa: McpImageQa, language: 'es' | 'en', ratio: string
 
 /**
  * Auto-retry selection. QA severity is a DEFECT score: LOWER is better (0 = clean). The retry replaces the first image only when its score is
- * strictly lower; a tie keeps the first (same price, no change). Exported so the rule is unit-tested on the real round-5c numbers.
+ * strictly lower; a tie keeps the first. Exported so the rule is unit-tested on the real round-5c numbers.
  */
 export function pickBetterBySeverity(first: number, retry: number): 'first' | 'retry' {
   return retry < first ? 'retry' : 'first'
@@ -315,6 +311,14 @@ export function pickBetterBySeverity(first: number, retry: number): 'first' | 'r
 
 const productBoxOf = (f: FidelityCheckResult): { x0: number; y0: number; x1: number; y1: number } | undefined =>
   f.status === 'ok' || f.status === 'unverified' ? f.details.productBox : f.status === 'warning' ? f.warning.details.productBox : undefined
+
+const locatedConfidently = (f: FidelityCheckResult): boolean =>
+  f.status === 'ok' ? f.details.confident : f.status === 'warning' ? f.warning.details.confident : false
+
+/** A kit logo that cannot ride as an /images/edits reference (vector file): stamped in code instead. */
+export function logoNeedsStamp(url: string | null | undefined): boolean {
+  return Boolean(url && /^data:image\/svg|\.svg(?:[?#]|$)/i.test(url.trim()))
+}
 
 export async function generateWebStyleImage(input: WebStyleImageInput): Promise<WebStyleImageOutput> {
   const { ctx } = input
@@ -324,22 +328,22 @@ export async function generateWebStyleImage(input: WebStyleImageInput): Promise<
   const language = input.language === 'en' ? 'en' : 'es'
 
   // Round 8 (MCP rules only): banned wording (kit forbiddenPhrases + the built-in regulated health claims) never reaches the Grok prompt or the code-rendered copy.
-  const withRulesEarly = input.mcpRules !== false
+  const withRules = input.mcpRules !== false
   const forbidden = kit?.forbiddenPhrases ?? []
   const removedClaimsAcc: string[] = []
   const scrubCopyIf = (c: string): string => {
-    if (!withRulesEarly || !c) return c
+    if (!withRules || !c) return c
     const r = scrubCopy(c, forbidden)
     removedClaimsAcc.push(...r.removed)
     return r.text
   }
   const scrubTextIf = (t: string | null | undefined): string | null | undefined => {
-    if (!withRulesEarly || !t) return t
+    if (!withRules || !t) return t
     const r = scrubClaims(t, forbidden)
     removedClaimsAcc.push(...r.removed)
     return r.text
   }
-  const offer = offerRaw && withRulesEarly
+  const offer = offerRaw && withRules
     ? { ...offerRaw, productDescription: scrubTextIf(offerRaw.productDescription) ?? null, differentiation: scrubTextIf(offerRaw.differentiation) ?? null, technicalSpecs: scrubTextIf(offerRaw.technicalSpecs) ?? null } as typeof offerRaw
     : offerRaw
   const extraContextScrubbed = input.extraContext?.map((c) => scrubTextIf(c) ?? '').filter(Boolean)
@@ -361,10 +365,9 @@ export async function generateWebStyleImage(input: WebStyleImageInput): Promise<
   const capped = input.layoutCap === false ? null : capCopyBlocks(copy)
   if (capped?.capped) copy = capped.onImage
   const ctaText = capped?.cta ?? capCopyBlocks(copy).cta
-  // The scene is a binding instruction (web-post-image `mcp.scene`), not a "Contexto factual (NO renderizar)" line.
-  const withRules = input.mcpRules !== false
   const businessContext = buildMcpBusinessContext({
     language,
+    // The scene is a binding instruction (web-post-image `mcp.scene`), not a "Contexto factual (NO renderizar)" line.
     ...(withRules ? {} : { scene: input.scene }),
     offer,
     extraContext: extraContextScrubbed,
@@ -372,17 +375,24 @@ export async function generateWebStyleImage(input: WebStyleImageInput): Promise<
     copySource,
   })
 
-  // Round 5b: logo + CTA are composited in code (MCP rules on only; the web-parity path keeps the legacy prompt).
-  const composite = withRules && input.compositeLayers !== false
-  const promptCopy = composite && ctaText ? copy.split(/\r?\n/).filter((l) => l.trim() !== ctaText.trim()).join('\n').trim() || copy : copy
-  const useKitRefs = input.referenceMode !== 'none'
+  // 0.26.0: the model designs the whole ad by default; the scene-only + code-layout flow is an explicit opt-in.
+  const composite = withRules && input.compositeLayers === true
+  const kitLogoUrl = kit?.logoUrl || null
+  // Code stamps the real logo only on request, or when the kit logo cannot be a reference (vector file).
+  const stampLogo = !composite && Boolean(kitLogoUrl) && (input.stampLogo === true || logoNeedsStamp(kitLogoUrl))
+  const copyLines = copy.split(/\r?\n/).map((l) => l.trim()).filter(Boolean)
+  const priceLine = !composite && input.stampPrice === true ? copyLines.find((l) => l !== ctaText && PRICE_RE.test(l)) : undefined
+  const promptCopy = composite && ctaText
+    ? copyLines.filter((l) => l !== ctaText.trim()).join('\n').trim() || copy
+    : priceLine ? copyLines.filter((l) => l !== priceLine).join('\n') : copy
+  const useAccessoryRefs = input.referenceMode !== 'none'
   const allowedList = (input.lock?.allowedProps || []).map((a) => a.trim()).filter(Boolean)
-  const accessoryCandidates = useKitRefs ? (input.accessories || []).filter((a) => a.imageUrl) : []
-  // allowedProps governs (default = no props): an accessory photo that the allowed list does not name is NOT attached (attaching it while the prompt
-  // says "only these extras" made Grok draw the TOPGT box / the controller anyway). Add it to allowedProps to include it.
+  const accessoryCandidates = useAccessoryRefs ? (input.accessories || []).filter((a) => a.imageUrl) : []
+  // allowedProps governs (default = no props): an accessory photo that the allowed list does not name is NOT attached.
   const accessories = withRules && allowedList.length ? accessoryCandidates.filter((a) => labelMatchesAllowed(a.label, allowedList)) : accessoryCandidates
   const droppedAccessories = accessoryCandidates.filter((a) => !accessories.includes(a))
-  const scopedLock = scopeLockToPhotoRole(input.lock?.immutableAttributes, { role: input.productPhotoRole, photoLabel: input.productPhotoLabel, attachedLabels: accessories.map((a) => a.label) })
+  const packOffer = isPackProduct([offerRaw?.name, offerRaw?.type, offerRaw?.productDescription, offerRaw?.technicalSpecs, input.productNotes])
+  const scopedLock = scopeLockToPhotoRole(input.lock?.immutableAttributes, { role: input.productPhotoRole, photoLabel: input.productPhotoLabel, attachedLabels: accessories.map((a) => a.label), packProduct: packOffer })
   const baseOptions = {
     apiKey: input.apiKey,
     aspectRatio: ratioPlan.generateAt,
@@ -400,16 +410,16 @@ export async function generateWebStyleImage(input: WebStyleImageInput): Promise<
     brandKitId: kit?.id ?? null,
     offerId: input.offerId,
     productRow: productRowFromOffer(offer),
+    // Confirmed product photos only (0.26.0: the kit's reference images are never appended as product refs).
     productUrls: input.productUrls,
     accessoryUrls: accessories.map((a) => a.imageUrl),
-    kitReferenceUrls: useKitRefs ? kit?.referenceImages || [] : [],
     supportUrls: input.supportUrls || [],
-    // composite: the logo is stamped in code from the asset, so it is not sent to Grok as a reference (it would redraw it).
-    logoUrl: composite ? null : kit?.logoUrl || null,
+    // Default: the kit logo rides as a reference and the model places it. composite / stampLogo: code stamps the real asset, so the model gets none.
+    logoUrl: composite || stampLogo ? null : kitLogoUrl,
     lockProductAppearance: input.lock?.lockProductAppearance,
     immutableAttributes: withRules ? [...scopedLock.attrs, ...(input.productPhotoRole && ACCESSORY_ROLES.has(input.productPhotoRole) && (scopedLock.dropped.length || scopedLock.attrs.length) ? [language === 'en' ? `the reference photo is the ${input.productPhotoLabel || input.productPhotoRole}: show ONLY that object, do not draw the main product or any other part next to it` : `la foto de referencia es ${input.productPhotoLabel || input.productPhotoRole}: mostrá SOLO ese objeto, no dibujes el producto principal ni otras piezas al lado`] : [])] : input.lock?.immutableAttributes,
   }
-  // Round 8: the plane-specific lock wording (wheels, landing gear, propellers, flaps, controllers) is only for plane-like products; everything else gets the generic lock.
+  // Round 8: the plane-specific lock wording is only for plane-like products; everything else gets the generic lock.
   const viewMayChange = Boolean(input.productPhotoRole && ['box', 'contents', 'part'].includes(input.productPhotoRole))
   const productKind = productKindOf([offerRaw?.name, offerRaw?.type, offerRaw?.productDescription, offerRaw?.technicalSpecs, input.productNotes])
   const mcpRules = (retryHint?: string) => ({
@@ -426,6 +436,7 @@ export async function generateWebStyleImage(input: WebStyleImageInput): Promise<
     ...(retryHint ? { retryHint } : {}),
     ...(input.productNotes?.trim() ? { productNotes: input.productNotes.trim().slice(0, 400) } : {}),
     productKind,
+    ...(packOffer ? { packProduct: true } : {}),
   })
   const reframe = async (grokImage: string, grokRatio: string) => {
     if (ratioPlan.needsReframe && grokImage.startsWith('data:')) {
@@ -441,23 +452,22 @@ export async function generateWebStyleImage(input: WebStyleImageInput): Promise<
       logoBox = await locateLogoBox(Buffer.from(logoDataUrl.slice(logoDataUrl.indexOf(',') + 1), 'base64'), Buffer.from(imageDataUrl.slice(imageDataUrl.indexOf(',') + 1), 'base64'))
     }
     return runMcpImageQa({
-    logoBox,
-    generatedDataUrl: imageDataUrl,
-    requestedRatio: ratioPlan.requested,
-    copyRequested: Boolean(copy),
-    logoAttached: Boolean(kit?.logoUrl),
-    logoExpected: Boolean(kit),
-    copy,
-    copyChanges: tidied.changes,
+      logoBox,
+      generatedDataUrl: imageDataUrl,
+      requestedRatio: ratioPlan.requested,
+      copyRequested: Boolean(promptCopy),
+      logoAttached: Boolean(kitLogoUrl) && !stampLogo,
+      logoExpected: Boolean(kit),
+      copy: promptCopy,
+      copyChanges: tidied.changes,
     })
   }
   const enforce = input.enforceSafeZones === true
-  // Legacy flow only: safe-zone defects fixed in code (scale-in) so they do not justify a second paid generation.
+  // Legacy explicit enforceSafeZones: safe-zone defects are fixed in code (scale-in) so they never justify a second paid generation.
   const effSeverity = (q: McpImageQa) => {
     if (composite) return qaSeverity({ ...q, ctaButtons: q.ctaButtons > 0 ? q.ctaButtons + 1 : 0 })
     return enforce ? qaSeverity({ ...q, safeZoneIssues: [] }) : q.severity
   }
-  const retryWorthy = (q: McpImageQa) => effSeverity(q) > 0
   // Composited flow: the scene as Grok drew it has no logo / CTA / copy-band text yet, so the QA only checks bands, buttons, separators.
   const qaScene = (imageDataUrl: string, excludeBoxes?: Array<{ x0: number; y0: number; x1: number; y1: number }>) =>
     runMcpImageQa({ generatedDataUrl: imageDataUrl, requestedRatio: ratioPlan.requested, copyRequested: false, logoAttached: true, logoExpected: false, copy: promptCopy, copyChanges: tidied.changes, sceneOnly: { bands: freeBands(ratioPlan.requested), ...(excludeBoxes?.length ? { excludeBoxes } : {}) } })
@@ -467,7 +477,9 @@ export async function generateWebStyleImage(input: WebStyleImageInput): Promise<
   type GrokRun = Awaited<ReturnType<typeof runWebPostGrokImage>>
   type Framed = { imageDataUrl: string; aspectRatio: string }
   const decode = (url: string) => Buffer.from(url.slice(url.indexOf(',') + 1), 'base64')
-  /** Everything after one generation: scene QA → seam blend / room → fidelity + props → code layers → final verdict. Run for the first image and, when it is retry-worthy, for the retry. */
+  const fetchBytes = async (u: string): Promise<Buffer | { error: string }> => { const f = await fetchPublicImageDetailed(u); return 'dataUrl' in f ? decode(f.dataUrl) : { error: `${f.failure.url} → ${f.failure.status ? `HTTP ${f.failure.status}` : f.failure.reason}` } }
+
+  /** Everything after one generation: free QA + the warning-only fidelity check; on the compositeLayers opt-in, the props checks + code layers. */
   const finishAttempt = async (grok: GrokRun, framed: Framed) => {
     let qa = await check(framed.imageDataUrl, grok.logoDataUrl)
     const preSeverity = effSeverity(qa)
@@ -475,271 +487,231 @@ export async function generateWebStyleImage(input: WebStyleImageInput): Promise<
     // Fidelity / props checks look at the picture exactly as Grok drew it (before any code layer).
     const preFixImageDataUrl = imageDataUrl
     let scenePrep: WebStyleImageOutput['scenePrep']
-      let safeZoneFix: SafeZoneFix | undefined
-      let qaBeforeFix: WebStyleImageOutput['qaBeforeFix']
-      let layers: AdLayoutReport | undefined
-      const fixBySquash = async (logo: Buffer | null) => {
-        // Round 8: the scale-in canvas (visible frame + stretched padding) NEVER runs for a composited image (Content's enforceSafeZones:true shrank a Sleeping Patches scene to 91 %
-        // because a dark nightstand looked like a CTA block). Only the legacy flow (compositeLayers:false) with an EXPLICIT enforceSafeZones:true may use it.
-        if (composite || input.enforceSafeZones !== true || !qa.safeZoneIssues.length || !imageDataUrl.startsWith('data:')) return
-        try {
-          const fixed = await enforceSafeZones({ bytes: decode(imageDataUrl), ratio: ratioPlan.requested, logo, issues: qa.safeZoneIssues })
-          if (fixed.fix.applied) {
-            const fixedUrl = `data:image/jpeg;base64,${fixed.bytes.toString('base64')}`
-            const fixedQa = await check(fixedUrl, grok.logoDataUrl)
-            qaBeforeFix = { safeZones: qa.safeZones, severity: qa.severity, issues: qa.warnings.slice(0, 6) }
-            safeZoneFix = fixed.fix
-            imageDataUrl = fixedUrl
-            qa = fixedQa
-            qa.scaleInUsed = true
-          }
-        } catch (err) {
-          safeZoneFix = { method: 'scale_in_fallback', applied: false, scale: 1, padTop: 0, padBottom: 0, attempts: 0, logoRestored: false, before: qa.safeZoneIssues, after: qa.safeZoneIssues, note: `safe-zone fix unavailable: ${err instanceof Error ? err.message.slice(0, 120) : 'error'}` }
+    let safeZoneFix: SafeZoneFix | undefined
+    let qaBeforeFix: WebStyleImageOutput['qaBeforeFix']
+    let layers: AdLayoutReport | undefined
+    const fixBySquash = async (logo: Buffer | null) => {
+      // The scale-in canvas never runs for a composited image; only the default flow with an EXPLICIT enforceSafeZones:true may use it.
+      if (composite || input.enforceSafeZones !== true || !qa.safeZoneIssues.length || !imageDataUrl.startsWith('data:')) return
+      try {
+        const fixed = await enforceSafeZones({ bytes: decode(imageDataUrl), ratio: ratioPlan.requested, logo, issues: qa.safeZoneIssues })
+        if (fixed.fix.applied) {
+          const fixedUrl = `data:image/jpeg;base64,${fixed.bytes.toString('base64')}`
+          const fixedQa = await check(fixedUrl, grok.logoDataUrl)
+          qaBeforeFix = { safeZones: qa.safeZones, severity: qa.severity, issues: qa.warnings.slice(0, 6) }
+          safeZoneFix = fixed.fix
+          imageDataUrl = fixedUrl
+          qa = fixedQa
+          qa.scaleInUsed = true
         }
+      } catch (err) {
+        safeZoneFix = { method: 'scale_in_fallback', applied: false, scale: 1, padTop: 0, padBottom: 0, attempts: 0, logoRestored: false, before: qa.safeZoneIssues, after: qa.safeZoneIssues, note: `safe-zone fix unavailable: ${err instanceof Error ? err.message.slice(0, 120) : 'error'}` }
       }
+    }
 
-      // Free local fidelity post-check — warning only, on the image we keep.
-      const fidelityCheck = grok.lockApplied
-        ? await checkGeneratedProductFidelity({ referenceDataUrls: grok.productReferenceDataUrls, generatedDataUrl: preFixImageDataUrl, tolerateViewChange: productKind !== 'plane' || viewMayChange })
-        : ({ status: 'skipped', reason: 'no product reference attached' } as FidelityCheckResult)
-      // Round 9: printed text on the product (free local OCR, tesseract): misspelled printing (Ciarity / Pick-Me-Lip) fails the image.
-      let packText: PackTextCheck | undefined
-      if (withRules && composite && productKind !== 'plane' && !viewMayChange && grok.lockApplied && preFixImageDataUrl.startsWith('data:')) {
-        const refUrl = grok.productReferenceDataUrls.find((u) => u.startsWith('data:'))
-        if (refUrl) {
-          try {
-            packText = await checkPackText({ reference: decode(refUrl), generated: decode(preFixImageDataUrl), generatedBox: productBoxOf(fidelityCheck) ?? null, attributes: scopedLock.attrs })
-          } catch { /* heuristic only */ }
-        }
-      }
-      // Free local props check (colour novelty vs every reference sent + real offer photos that are not allowed): warning only.
-      let propsCheck: ExtraObjectsFinding | undefined
-      let unlisted: UnlistedObject[] = []
-      const productBox = productBoxOf(fidelityCheck)
+    // Free local fidelity post-check — WARNING ONLY: never fails, never retries, never changes the charge.
+    const fidelityCheck = grok.lockApplied
+      ? await checkGeneratedProductFidelity({ referenceDataUrls: grok.productReferenceDataUrls, generatedDataUrl: preFixImageDataUrl, tolerateViewChange: productKind !== 'plane' || viewMayChange })
+      : ({ status: 'skipped', reason: 'no product reference attached' } as FidelityCheckResult)
+    const productBox = productBoxOf(fidelityCheck)
+
+    // ---- compositeLayers opt-in only: props heuristics + code layout (the default path runs none of this) ----
+    let propsCheck: ExtraObjectsFinding | undefined
+    let unlisted: UnlistedObject[] = []
+    let cables: SceneBlob[] = []
+    if (composite && preFixImageDataUrl.startsWith('data:')) {
       const accessoryRefCount = grok.referencesUsed.filter((k) => k === 'accessory').length
       try {
-        const imgBytes = Buffer.from(preFixImageDataUrl.slice(preFixImageDataUrl.indexOf(',') + 1), 'base64')
-        const refBytes = grok.allReferenceDataUrls.filter((u) => u.startsWith('data:')).map((u) => Buffer.from(u.slice(u.indexOf(',') + 1), 'base64'))
-        if (preFixImageDataUrl.startsWith('data:') && refBytes.length) {
-          // The allowed props explain colours only when they have no photo of their own: the budget is the listed props without an attached accessory photo (≤ 2).
-          propsCheck = await checkExtraObjects({ generated: imgBytes, references: refBytes, productBox: productBox ?? null, allowedCount: Math.min(2, Math.max(0, allowedList.length - accessoryRefCount)), mode: composite ? 'scene' : 'strict' })
-        }
-        // Real photos of objects the allowed list does NOT name (dropped accessories + the offer's other box / contents photos): do they show up in the scene?
+        const imgBytes = decode(preFixImageDataUrl)
+        const refBytes = grok.allReferenceDataUrls.filter((u) => u.startsWith('data:')).map(decode)
+        if (refBytes.length) propsCheck = await checkExtraObjects({ generated: imgBytes, references: refBytes, productBox: productBox ?? null, allowedCount: Math.min(2, Math.max(0, allowedList.length - accessoryRefCount)), mode: 'scene' })
         const lib = [...droppedAccessories, ...(input.libraryPhotos || []).filter((p) => p.imageUrl && !labelMatchesAllowed(p.label, allowedList))].slice(0, 3)
-        if (withRules && lib.length && preFixImageDataUrl.startsWith('data:')) {
+        if (lib.length) {
           const objects: Array<{ label: string; bytes: Buffer }> = []
           for (const o of lib) {
             const got = await fetchPublicImageDetailed(o.imageUrl).catch(() => null)
-            if (got && 'dataUrl' in got) objects.push({ label: o.label, bytes: Buffer.from(got.dataUrl.slice(got.dataUrl.indexOf(',') + 1), 'base64') })
+            if (got && 'dataUrl' in got) objects.push({ label: o.label, bytes: decode(got.dataUrl) })
           }
           unlisted = await findUnlistedObjects({ generated: imgBytes, objects })
         }
       } catch { /* heuristic only */ }
-      // Round 9: whole extra objects the colour heuristic cannot see — a thin saturated structure (USB cable) that no allowed prop / attached photo names.
-      let cables: SceneBlob[] = []
       try {
         const cableAllowed = /\b(cable|usb|cargador|charger|cord)/i.test([...allowedList, ...accessories.map((a) => a.label)].join(' '))
-        if (withRules && composite && !cableAllowed && preFixImageDataUrl.startsWith('data:')) {
-          const found = await findThinStructures(Buffer.from(preFixImageDataUrl.slice(preFixImageDataUrl.indexOf(',') + 1), 'base64'), { ignoreTop: 0.06, ignoreBottom: 0.01 })
+        if (!cableAllowed) {
+          const found = await findThinStructures(decode(preFixImageDataUrl), { ignoreTop: 0.06, ignoreBottom: 0.01 })
           const pb = productBox
           cables = found.cables.filter((c) => !(pb && (c.box.x0 + c.box.x1) / 2 >= pb.x0 && (c.box.x0 + c.box.x1) / 2 <= pb.x1 && (c.box.y0 + c.box.y1) / 2 >= pb.y0 && (c.box.y0 + c.box.y1) / 2 <= pb.y1))
           if (cables.length && propsCheck) propsCheck = { ...propsCheck, suspected: true, cables: cables.map((c) => ({ box: c.box, share: Math.round(c.area * 1000) / 10 })) }
         }
       } catch { /* heuristic only */ }
-      const propsFlagged = Boolean(propsCheck?.suspected) || unlisted.length > 0 || cables.length > 0
-      const propsReason = [
-        cables.length ? `a thin cable-like object (${cables.map((c) => `${Math.round(c.box.x0 * 100)}–${Math.round(c.box.x1 * 100)}% × ${Math.round(c.box.y0 * 100)}–${Math.round(c.box.y1 * 100)}%`).join(', ')}) is in the scene and no allowed prop / attached photo names a cable (invented accessory)` : '',
-        propsCheck?.suspected && !(cables.length && propsCheck.count <= propsCheck.budget) ? propsCheck.note : '',
-        unlisted.length ? `real photo(s) of ${unlisted.map((u) => `"${u.label}"`).join(', ')} show up in the scene but the allowed props do not name them (invented / unlisted prop)` : '',
-      ].filter(Boolean).join('; ')
+    }
+    const propsFlagged = Boolean(propsCheck?.suspected) || unlisted.length > 0 || cables.length > 0
+    const propsReason = [
+      cables.length ? `a thin cable-like object (${cables.map((c) => `${Math.round(c.box.x0 * 100)}–${Math.round(c.box.x1 * 100)}% × ${Math.round(c.box.y0 * 100)}–${Math.round(c.box.y1 * 100)}%`).join(', ')}) is in the scene and no allowed prop / attached photo names a cable (invented accessory)` : '',
+      propsCheck?.suspected && !(cables.length && propsCheck.count <= propsCheck.budget) ? propsCheck.note : '',
+      unlisted.length ? `real photo(s) of ${unlisted.map((u) => `"${u.label}"`).join(', ')} show up in the scene but the allowed props do not name them (invented / unlisted prop)` : '',
+    ].filter(Boolean).join('; ')
 
-      if (composite && imageDataUrl.startsWith('data:')) {
-        // Explicit opt-in only (enforceSafeZones:true): scale the scene in when text is still inside the free bands after the retry. Never the default.
-        await fixBySquash(null)
-        let logoBytes: Buffer | null = null
-        let logoNote = ''
-        let logoIcon: Awaited<ReturnType<typeof logoIconCheck>> | null = null
-        // Round 9: wordmark / primary variant before the kit logo_url, never a favicon / app icon while a non-icon logo loads
-        const pickedLogo = await loadAdLogo(kit, async (u) => { const f = await fetchPublicImageDetailed(u); return 'dataUrl' in f ? decode(f.dataUrl) : { error: `${f.failure.url} → ${f.failure.status ? `HTTP ${f.failure.status}` : f.failure.reason}` } })
-        logoBytes = pickedLogo.bytes
-        logoIcon = pickedLogo.icon
-        if (!logoBytes && pickedLogo.notes.length) logoNote = pickedLogo.notes[0]
-        if (pickedLogo.skippedIcons.length) qa.warnings.push(`logo: ${pickedLogo.skippedIcons.length} icon / favicon logo(s) of the kit skipped in favour of the wordmark (${pickedLogo.url})`)
-        // Where the located things are (fractions): the product, unlisted objects, and the attached real accessories (box / controller) — the CTA and the text stay off them.
-        let accessoryBoxes: Array<{ x0: number; y0: number; x1: number; y1: number }> = []
-        if (accessories.length && imageDataUrl.startsWith('data:')) {
-          try {
-            const objs: Array<{ label: string; bytes: Buffer }> = []
-            for (const o of accessories.slice(0, 2)) {
-              const got = await fetchPublicImageDetailed(o.imageUrl).catch(() => null)
-              if (got && 'dataUrl' in got) objs.push({ label: o.label, bytes: decode(got.dataUrl) })
-            }
-            accessoryBoxes = (await findUnlistedObjects({ generated: decode(imageDataUrl), objects: objs })).map((u) => u.box)
-          } catch { /* best effort */ }
-        }
-        // compact colour-cluster boxes (a prop the colour check located) are kept off too; a cluster spread over most of the picture (a thin cable) says nothing about where to stay away from
-        const clusterBoxes = (propsCheck?.clusters ?? []).map((c) => c.box).filter((b): b is NonNullable<typeof b> => Boolean(b) && (b!.x1 - b!.x0) * (b!.y1 - b!.y0) <= 0.2)
-        const avoid = [...(productBox ? [productBox] : []), ...unlisted.map((u) => u.box), ...accessoryBoxes, ...clusterBoxes, ...cables.map((c) => c.box)]
+    if (composite && imageDataUrl.startsWith('data:')) {
+      let logoNote = ''
+      // Round 9: wordmark / primary variant before the kit logo_url, never a favicon / app icon while a non-icon logo loads
+      const pickedLogo = await loadAdLogo(kit, fetchBytes)
+      const logoBytes = pickedLogo.bytes
+      const logoIcon = pickedLogo.icon
+      if (!logoBytes && pickedLogo.notes.length) logoNote = pickedLogo.notes[0]
+      if (pickedLogo.skippedIcons.length) qa.warnings.push(`logo: ${pickedLogo.skippedIcons.length} icon / favicon logo(s) of the kit skipped in favour of the wordmark (${pickedLogo.url})`)
+      let accessoryBoxes: Array<{ x0: number; y0: number; x1: number; y1: number }> = []
+      if (accessories.length) {
         try {
-          const blocks = splitCopyBlocks(copy, ctaText)
-          // ---- Round 7 (free, local): flat strips → continued from the scene; text never on the product (picture moved down when the top is occupied) ----
-      const done = await prepareAndLayout({
-        bytes: decode(imageDataUrl),
-        ratio: ratioPlan.requested,
-        logo: logoBytes,
-        blocks,
-        palette: { primary: kit?.primaryColor, secondary: kit?.secondaryColor, accent: kit?.accentColor },
-        fonts: { headingFont: kit?.fontPrimary ?? null, bodyFont: null },
-        // Where the located product / unlisted objects are (fractions): text and the CTA are kept off them.
-        avoid,
-        makeRoom: input.makeRoom,
-        // Round 8: a second facts line (shipping first) stays on the image when there is room; otherwise it goes to the caption
-        optionalFacts: rankFacts((capped?.overflow ?? []).filter((l) => factRankOf(l) <= 2)).slice(0, 1),
-      })
-      const sceneBytes = done.sceneBytes
-      const sceneAvoid = done.sceneAvoid
-      scenePrep = done.scenePrep
-      const sceneUrl = `data:image/jpeg;base64,${sceneBytes.toString('base64')}`
-          layers = done.report
-          if (layers.logo.status === 'unavailable' && logoNote) layers.logo.reason = logoNote
-          imageDataUrl = `data:image/jpeg;base64,${done.bytes.toString('base64')}`
-          // QA of the SCENE (what Grok drew: any text / button in the free bands, separators) + the layout report of what the code drew.
-          const sceneQa = await qaScene(sceneUrl, sceneAvoid[0] && productBox ? [sceneAvoid[0]] : undefined)
-          const r = done.report
-          const drewText = r.text.drawn
-          const wantsText = Boolean(blocks.headline || blocks.price || blocks.facts?.length)
-          const layoutIssues: string[] = []
-          if (r.layout.overlaps.length) layoutIssues.push(`layout overlap: ${r.layout.overlaps.join(', ')}`)
-          if (!r.text.fits) layoutIssues.push('some text did not fit its box')
-          if (r.text.lowContrast) layoutIssues.push('text contrast below 4.5:1')
-          if (!r.layout.insideSafeZones) layoutIssues.push('an element sits outside the safe zones')
-          qa = {
-            ...sceneQa,
-            textLayers: 'code',
-            textPresent: wantsText ? (drewText ? 'yes' : 'no') : 'not_requested',
-            logo: r.logo.status === 'drawn' ? 'attached' : 'none',
-            // Round 8: the count comes ONLY from the compositor's own layer report (our one pill). What the scene heuristics read as button-like / text-like / block in the
-            // bands (a bench edge, a seam, dark furniture) is scene content, not a code layer: reported as qa.sceneButtonLike + warnings, never a fail trigger.
-            ctaButtons: r.cta.status === 'drawn' ? 1 : 0,
-            extraCtaRisk: false,
-            sceneButtonLike: sceneQa.ctaButtons,
-            safeZones: r.layout.insideSafeZones ? 'ok' : 'violation',
-            warnings: [...sceneQa.warnings.filter((w) => !w.startsWith('the brand kit has no logo')), ...layoutIssues],
+          const objs: Array<{ label: string; bytes: Buffer }> = []
+          for (const o of accessories.slice(0, 2)) {
+            const got = await fetchPublicImageDetailed(o.imageUrl).catch(() => null)
+            if (got && 'dataUrl' in got) objs.push({ label: o.label, bytes: decode(got.dataUrl) })
           }
-          if (r.logo.status === 'unavailable') qa.logoUnavailable = true
-          if (logoIcon?.looksLikeIcon) {
-            qa.logoLooksLikeIcon = true
-            qa.warnings.push(`the kit logo looks like a favicon / app icon, not the wordmark (${logoIcon.reason}): it is placed as it is — upload the real wordmark logo to the brand kit (qa.logoLooksLikeIcon)`)
-          }
-          if (scenePrep) {
-            const sm = scenePrep.seams
-            qa.seams = { found: sm.found.length, blended: sm.found.length > 0 && (sm.remaining ?? sm.found.length) === 0, remaining: sm.found.length ? (sm.remaining ?? sm.found.length) : 0, details: sm.found.map((s) => ({ edge: s.edge, share: s.stripShare, step: s.step })) }
-            if (sm.cropZoom?.applied) qa.warnings.push(`the scene had flat ${sm.found.map((x) => `${x.edge} ${Math.round(x.stripShare * 100)}%`).join(' + ')} strip(s) (letterbox look): cut off and the picture zoomed ${Math.round(((sm.cropZoom.zoom ?? 1) - 1) * 1000) / 10}% (nothing synthetic, no blend; qa.seams.cropZoom)`)
-            else if (sm.found.length && qa.seams.blended) qa.warnings.push(`the scene had flat ${sm.found.map((s) => `${s.edge} ${Math.round(s.stripShare * 100)}%`).join(' + ')} strip(s) (letterbox look): continued from the scene in code, no visible band edge left (scenePrep.seams)`)
-            if (sm.skipped?.length) {
-              qa.seamBlendSkipped = true
-              qa.warnings.push(`seam blend skipped: ${sm.skipped.map((k) => `${k.edge} strip next to detailed content (${Math.round(k.detail * 100)}%)`).join(', ')} — blending would smear it, so the strip is left as it is; regenerate with the product lower and a natural full-bleed scene (qa.seamBlendSkipped)`)
-            }
-            if (qa.seams.remaining) qa.warnings.push(`seam: ${qa.seams.remaining} flat strip(s) / visible band edge(s) remain after blending (letterbox look)`)
-            if (scenePrep.room?.applied) qa.warnings.push(`scene prep: ${scenePrep.room.note}`)
-            if (scenePrep.roomBelow?.attempted) qa.warnings.push(`scene prep (bottom): ${scenePrep.roomBelow.note}`)
-            if (scenePrep.extended) qa.warnings.push(`scene prep: ${scenePrep.extended.note}`)
-            if (sm.cropZoom?.applied) qa.seams.cropZoom = { zoom: sm.cropZoom.zoom ?? 1, cropTopPx: sm.cropZoom.cropTopPx ?? 0, cropBottomPx: sm.cropZoom.cropBottomPx ?? 0 }
-          }
-          qa.textScale = r.text.drawn ? r.text.scale : undefined
-          if (r.text.drawn && r.text.scale < TEXT_SCALE_WARN) qa.warnings.push(`text scaled to ${Math.round(r.text.scale * 100)}% of its nominal size (< ${Math.round(TEXT_SCALE_WARN * 100)}%): ${r.text.textOverProduct ? 'the scene left no calm corridor for the text' : 'the calm corridor above the product is short'} — small type reads poorly; regenerate with the product lower in the frame`)
-          if (scenePrep?.ctaBlocked || (r.cta.status === 'drawn' && r.cta.blocked)) {
-            qa.ctaBlocked = true
-            qa.warnings.push('the CTA button touches the located product / an accessory in every slot of the bottom band even after moving the picture up and extending the canvas: it was still drawn (≥ 86% size, the CTA is never dropped) on the least bad slot — defect, regenerate with the product and accessories above 82% of the height (qa.ctaBlocked)')
-          }
-          if (r.logo.status === 'drawn' && r.logo.plate) qa.warnings.push(`the logo sat on a similar-tone / busy area (contrast ${r.logo.contrastBefore}): it was put on a solid ${r.logo.plate.fill} plate (contrast now ${r.logo.contrast})`)
-          if (r.cta.busy) {
-            qa.ctaBusy = true
-            qa.warnings.push('the CTA button sits on a busy area / the product: every slot of the bottom band was busy (compositeLayers.cta.busy)')
-          }
-          if (r.text.textOverProduct) qa.warnings.push('text over the product: the scene left no calm area for the text, so it was laid over the top of the objects on a soft scrim (compositeLayers.text.textOverProduct) — defect, regenerate with the product lower in the frame')
-          if (r.cta.seam) qa.warnings.push('the CTA straddles a hard edge of the scene (table edge / band seam) in every slot (compositeLayers.cta.seam)')
-          if (!ctaText) qa.warnings.push('the copy has no CTA line: no button was drawn')
-          else if (r.cta.fits === false) qa.warnings.push('the CTA text is long: the button text was shrunk to fit')
-          qa.severity = qaSeverity({ ...qa, safeZoneIssues: sceneQa.safeZoneIssues }) + (r.layout.overlaps.length ? 3 : 0) + (r.text.lowContrast ? 2 : 0) + (!r.text.fits ? 2 : 0)
-        } catch (err) {
-          qa.warnings.push(`layout compositor unavailable: ${err instanceof Error ? err.message.slice(0, 120) : 'error'}`)
-          qa.textPresent = 'no'
-          qa.status = 'fail'
+          accessoryBoxes = (await findUnlistedObjects({ generated: decode(imageDataUrl), objects: objs })).map((u) => u.box)
+        } catch { /* best effort */ }
+      }
+      const clusterBoxes = (propsCheck?.clusters ?? []).map((c) => c.box).filter((b): b is NonNullable<typeof b> => Boolean(b) && (b!.x1 - b!.x0) * (b!.y1 - b!.y0) <= 0.2)
+      const avoid = [...(productBox ? [productBox] : []), ...unlisted.map((u) => u.box), ...accessoryBoxes, ...clusterBoxes, ...cables.map((c) => c.box)]
+      try {
+        const blocks = splitCopyBlocks(copy, ctaText)
+        const done = await prepareAndLayout({
+          bytes: decode(imageDataUrl),
+          ratio: ratioPlan.requested,
+          logo: logoBytes,
+          blocks,
+          palette: { primary: kit?.primaryColor, secondary: kit?.secondaryColor, accent: kit?.accentColor },
+          fonts: { headingFont: kit?.fontPrimary ?? null, bodyFont: null },
+          avoid,
+          makeRoom: input.makeRoom,
+          optionalFacts: rankFacts((capped?.overflow ?? []).filter((l) => factRankOf(l) <= 2)).slice(0, 1),
+        })
+        scenePrep = done.scenePrep
+        const sceneUrl = `data:image/jpeg;base64,${done.sceneBytes.toString('base64')}`
+        layers = done.report
+        if (layers.logo.status === 'unavailable' && logoNote) layers.logo.reason = logoNote
+        imageDataUrl = `data:image/jpeg;base64,${done.bytes.toString('base64')}`
+        const sceneQa = await qaScene(sceneUrl, done.sceneAvoid[0] && productBox ? [done.sceneAvoid[0]] : undefined)
+        const r = done.report
+        const wantsText = Boolean(blocks.headline || blocks.price || blocks.facts?.length)
+        const layoutIssues: string[] = []
+        if (r.layout.overlaps.length) layoutIssues.push(`layout overlap: ${r.layout.overlaps.join(', ')}`)
+        if (!r.text.fits) layoutIssues.push('some text did not fit its box')
+        if (r.text.lowContrast) layoutIssues.push('text contrast below 4.5:1')
+        if (!r.layout.insideSafeZones) layoutIssues.push('an element sits outside the safe zones')
+        qa = {
+          ...sceneQa,
+          textLayers: 'code',
+          textPresent: wantsText ? (r.text.drawn ? 'yes' : 'no') : 'not_requested',
+          logo: r.logo.status === 'drawn' ? 'attached' : 'none',
+          // The count comes ONLY from the compositor's own layer report (our one pill); scene button-like blocks are informational.
+          ctaButtons: r.cta.status === 'drawn' ? 1 : 0,
+          extraCtaRisk: false,
+          sceneButtonLike: sceneQa.ctaButtons,
+          safeZones: r.layout.insideSafeZones ? 'ok' : 'violation',
+          warnings: [...sceneQa.warnings.filter((w) => !w.startsWith('the brand kit has no logo')), ...layoutIssues],
         }
-      } else {
-        // Legacy flow (Grok draws logo + CTA): deterministic scale-in fix as before, with the real logo re-stamped if it was clipped.
-        const logoBytes = grok.logoDataUrl?.startsWith('data:') ? decode(grok.logoDataUrl) : null
-        await fixBySquash(logoBytes)
+        if (r.logo.status === 'unavailable') qa.logoUnavailable = true
+        if (logoIcon?.looksLikeIcon) {
+          qa.logoLooksLikeIcon = true
+          qa.warnings.push(`the kit logo looks like a favicon / app icon, not the wordmark (${logoIcon.reason}): it is placed as it is — upload the real wordmark logo to the brand kit (qa.logoLooksLikeIcon)`)
+        }
+        if (scenePrep) {
+          const sm = scenePrep.seams
+          qa.seams = { found: sm.found.length, blended: sm.found.length > 0 && (sm.remaining ?? sm.found.length) === 0, remaining: sm.found.length ? (sm.remaining ?? sm.found.length) : 0, details: sm.found.map((s) => ({ edge: s.edge, share: s.stripShare, step: s.step })) }
+          if (sm.cropZoom?.applied) qa.warnings.push(`the scene had flat ${sm.found.map((x) => `${x.edge} ${Math.round(x.stripShare * 100)}%`).join(' + ')} strip(s): cut off and the picture zoomed ${Math.round(((sm.cropZoom.zoom ?? 1) - 1) * 1000) / 10}% (qa.seams.cropZoom)`)
+          else if (sm.found.length && qa.seams.blended) qa.warnings.push(`the scene had flat ${sm.found.map((s) => `${s.edge} ${Math.round(s.stripShare * 100)}%`).join(' + ')} strip(s): continued from the scene in code (scenePrep.seams)`)
+          if (sm.skipped?.length) {
+            qa.seamBlendSkipped = true
+            qa.warnings.push(`seam blend skipped: ${sm.skipped.map((k) => `${k.edge} strip next to detailed content (${Math.round(k.detail * 100)}%)`).join(', ')} (qa.seamBlendSkipped)`)
+          }
+          if (qa.seams.remaining) qa.warnings.push(`seam: ${qa.seams.remaining} flat strip(s) / visible band edge(s) remain after blending (letterbox look)`)
+          if (scenePrep.room?.applied) qa.warnings.push(`scene prep: ${scenePrep.room.note}`)
+          if (scenePrep.roomBelow?.attempted) qa.warnings.push(`scene prep (bottom): ${scenePrep.roomBelow.note}`)
+          if (scenePrep.extended) qa.warnings.push(`scene prep: ${scenePrep.extended.note}`)
+          if (sm.cropZoom?.applied) qa.seams.cropZoom = { zoom: sm.cropZoom.zoom ?? 1, cropTopPx: sm.cropZoom.cropTopPx ?? 0, cropBottomPx: sm.cropZoom.cropBottomPx ?? 0 }
+        }
+        qa.textScale = r.text.drawn ? r.text.scale : undefined
+        if (r.text.drawn && r.text.scale < TEXT_SCALE_WARN) qa.warnings.push(`text scaled to ${Math.round(r.text.scale * 100)}% of its nominal size (< ${Math.round(TEXT_SCALE_WARN * 100)}%)`)
+        if (scenePrep?.ctaBlocked || (r.cta.status === 'drawn' && r.cta.blocked)) {
+          qa.ctaBlocked = true
+          qa.warnings.push('the CTA button touches the located product / an accessory in every slot of the bottom band: drawn on the least bad slot (qa.ctaBlocked)')
+        }
+        if (r.logo.status === 'drawn' && r.logo.plate) qa.warnings.push(`the logo sat on a similar-tone / busy area (contrast ${r.logo.contrastBefore}): it was put on a solid ${r.logo.plate.fill} plate (contrast now ${r.logo.contrast})`)
+        if (r.cta.busy) {
+          qa.ctaBusy = true
+          qa.warnings.push('the CTA button sits on a busy area / the product: every slot of the bottom band was busy (compositeLayers.cta.busy)')
+        }
+        if (r.text.textOverProduct) qa.warnings.push('text over the product: the scene left no calm area for the text (compositeLayers.text.textOverProduct)')
+        if (r.cta.seam) qa.warnings.push('the CTA straddles a hard edge of the scene (table edge / band seam) in every slot (compositeLayers.cta.seam)')
+        if (!ctaText) qa.warnings.push('the copy has no CTA line: no button was drawn')
+        else if (r.cta.fits === false) qa.warnings.push('the CTA text is long: the button text was shrunk to fit')
+        qa.severity = qaSeverity({ ...qa, safeZoneIssues: sceneQa.safeZoneIssues }) + (r.layout.overlaps.length ? 3 : 0) + (r.text.lowContrast ? 2 : 0) + (!r.text.fits ? 2 : 0)
+      } catch (err) {
+        qa.warnings.push(`layout compositor unavailable: ${err instanceof Error ? err.message.slice(0, 120) : 'error'}`)
+        qa.textPresent = 'no'
+        qa.status = 'fail'
       }
+    } else {
+      // Default flow (the model drew the whole ad): only the legacy explicit scale-in, with the real logo re-stamped if it was clipped.
+      const logoBytes = grok.logoDataUrl?.startsWith('data:') ? decode(grok.logoDataUrl) : null
+      await fixBySquash(logoBytes)
+    }
 
-      // ---- final verdict: defects fail, flagged-but-usable results warn, scale-in is never a 'pass' ---------------------------------
-      if (composite && input.enforceSafeZones === true) qa.warnings.push('enforceSafeZones ignored: with compositeLayers the scale-in canvas never runs (all text / logo / CTA are drawn in code inside the safe zones, the picture is never shrunk or framed)')
-      if (safeZoneFix?.applied) {
-        qa.scaleInUsed = true
-        qa.warnings.push(`scale-in fallback used: the picture was shrunk to ${Math.round(safeZoneFix.scale * 100)}% inside a padded canvas (visible frame) — treat as a defect and regenerate`)
-        qa.severity = Math.max(qa.severity, 5) + 5
-      }
-      if (composite && layers) {
-        const r = layers
-        const layoutBad = r.layout.overlaps.length > 0 || !r.text.fits || r.text.lowContrast || !r.layout.insideSafeZones
-        qa.status = qa.safeZones === 'violation' || qa.separatorLines.length > 0 || qa.textPresent === 'no' || qa.extraCtaRisk || Boolean(qa.ctaBlocked) || packText?.status === 'fail' || layoutBad || qa.scaleInUsed || r.text.textOverProduct || (qa.seams?.remaining ?? 0) > 0 ? 'fail' : 'pass'
-      } else if (qa.scaleInUsed) qa.status = 'fail'
-      if (droppedAccessories.length) qa.warnings.push(`accessory photo(s) not attached (not named in allowedProps): ${droppedAccessories.map((a) => '"' + a.label + '"').join(', ')} - add them to allowedProps to include them`)
-      if (propsFlagged) qa.warnings.push(`props: ${propsReason}`)
-      if (fidelityCheck.status === 'warning') qa.warnings.push(`fidelity: ${fidelityCheck.warning.reason}`)
-      if (packText && (packText.status === 'fail' || packText.status === 'warning')) qa.warnings.push(`printed text (OCR ${packText.engine}): ${packText.reason}${packText.status === 'fail' ? ' — defect (qa.packText)' : ''}`)
-      if (packText) qa.packText = packText.status === 'pass' || packText.status === 'warning' || packText.status === 'fail' ? { status: packText.status, engine: packText.engine, score: packText.score, misspelled: packText.misspelled.map((m) => `${m.found}→${m.expected}`) } : { status: packText.status, engine: packText.engine }
-      // Round 7 severity factors: the things that used to hide behind severity 0 / 'warning' now count, so the single auto-retry fires and the better result is kept.
-      const factors: Record<string, number> = {}
-      if (composite && layers) {
-        if ((qa.seams?.remaining ?? 0) > 0) factors.seam = 3 * (qa.seams?.remaining ?? 0)
-        if (layers.text.textOverProduct) factors.textOverProduct = 4
-        if (layers.text.drawn && layers.text.scale < TEXT_SCALE_LOW) factors.textScale = 3
-        else if (layers.text.drawn && layers.text.scale < TEXT_SCALE_WARN) factors.textScale = 1.5
-        if (layers.cta.seam) factors.ctaSeam = 1
-        // Round 9: a CTA on the product is the worst layout defect: weigh it so the single autoRetry always fires and the clean attempt wins
-        if (qa.ctaBlocked) factors.ctaBlocked = 8
-        else if (qa.ctaBusy) factors.ctaBusy = 2
-      }
-      if (fidelityCheck.status === 'warning') factors.fidelity = fidelityCheck.warning.score < FIDELITY_RETRY_BELOW ? 4 : 1.5
+    // ---- final verdict: defects fail, flagged-but-usable results warn, scale-in is never a 'pass' ----
+    if (composite && input.enforceSafeZones === true) qa.warnings.push('enforceSafeZones ignored: with compositeLayers the scale-in canvas never runs')
+    if (safeZoneFix?.applied) {
+      qa.scaleInUsed = true
+      qa.warnings.push(`scale-in fallback used: the picture was shrunk to ${Math.round(safeZoneFix.scale * 100)}% inside a padded canvas (visible frame) — treat as a defect`)
+      qa.severity = Math.max(qa.severity, 5) + 5
+    }
+    if (composite && layers) {
+      const r = layers
+      const layoutBad = r.layout.overlaps.length > 0 || !r.text.fits || r.text.lowContrast || !r.layout.insideSafeZones
+      qa.status = qa.safeZones === 'violation' || qa.separatorLines.length > 0 || qa.textPresent === 'no' || qa.extraCtaRisk || Boolean(qa.ctaBlocked) || layoutBad || qa.scaleInUsed || r.text.textOverProduct || (qa.seams?.remaining ?? 0) > 0 ? 'fail' : 'pass'
+    } else if (qa.scaleInUsed) qa.status = 'fail'
+    if (droppedAccessories.length) qa.warnings.push(`accessory photo(s) not attached (not named in allowedProps): ${droppedAccessories.map((a) => '"' + a.label + '"').join(', ')} - add them to allowedProps to include them`)
+    if (propsFlagged) qa.warnings.push(`props: ${propsReason}`)
+    if (fidelityCheck.status === 'warning') qa.warnings.push(`fidelity (warning only): ${fidelityCheck.warning.reason}`)
+    // compositeLayers opt-in severity factors (they only matter with an explicit autoRetry). Fidelity is never a factor (warning only).
+    const factors: Record<string, number> = {}
+    if (composite && layers) {
+      if ((qa.seams?.remaining ?? 0) > 0) factors.seam = 3 * (qa.seams?.remaining ?? 0)
+      if (layers.text.textOverProduct) factors.textOverProduct = 4
+      if (layers.text.drawn && layers.text.scale < TEXT_SCALE_LOW) factors.textScale = 3
+      else if (layers.text.drawn && layers.text.scale < TEXT_SCALE_WARN) factors.textScale = 1.5
+      if (layers.cta.seam) factors.ctaSeam = 1
+      if (qa.ctaBlocked) factors.ctaBlocked = 8
+      else if (qa.ctaBusy) factors.ctaBusy = 2
       if (propsFlagged) factors.props = 2 + unlisted.length + 2 * cables.length
-      if (packText?.status === 'fail') factors.packText = 5
-      else if (packText?.status === 'warning') factors.packText = 1.5
-      if (Object.keys(factors).length) {
-        qa.severityFactors = factors
-        if (composite) qa.severity = Math.round((qa.severity + Object.values(factors).reduce((a, b) => a + b, 0)) * 100) / 100
-      }
-      if (qa.status === 'pass' && (propsFlagged || packText?.status === 'warning' || qa.sceneText === 'text_in_bands' || qa.logoLooksLikeIcon || fidelityCheck.status === 'warning' || qa.ctaBusy || layers?.text.textOverProduct || (layers?.text.scale ?? 1) < TEXT_SCALE_WARN)) qa.status = 'warning'
+    }
+    if (Object.keys(factors).length) {
+      qa.severityFactors = factors
+      qa.severity = Math.round((qa.severity + Object.values(factors).reduce((a, b) => a + b, 0)) * 100) / 100
+    }
+    if (qa.status === 'pass' && (propsFlagged || qa.sceneText === 'text_in_bands' || qa.logoLooksLikeIcon || fidelityCheck.status === 'warning' || qa.ctaBusy || layers?.text.textOverProduct || (layers?.text.scale ?? 1) < TEXT_SCALE_WARN)) qa.status = 'warning'
 
-    
-    return { grok, framed, qa, imageDataUrl, fidelityCheck, packText, propsCheck, unlisted, propsFlagged, propsReason, safeZoneFix, qaBeforeFix, layers, scenePrep, aspectRatio: framed.aspectRatio, decisionSeverity: composite && layers ? qa.severity : preSeverity }
+    return { grok, framed, qa, imageDataUrl, fidelityCheck, propsCheck, unlisted, propsFlagged, propsReason, safeZoneFix, qaBeforeFix, layers, scenePrep, aspectRatio: framed.aspectRatio, decisionSeverity: composite && layers ? qa.severity : preSeverity }
   }
   type Attempt = Awaited<ReturnType<typeof finishAttempt>>
 
+  const paidCalls: PaidCall[] = []
   const autoRetry: WebStyleImageOutput['autoRetry'] = { requested: input.autoRetry === true, attempted: false }
   const firstGrok = await runWebPostGrokImage({ ...baseOptions, ...(withRules ? { mcp: mcpRules() } : {}) })
-  let totalCost = firstGrok.estimatedCostUsd
+  paidCalls.push({ purpose: 'generate', provider: 'xai', model: firstGrok.providerModel, costUsd: firstGrok.estimatedCostUsd })
   let kept: Attempt = await finishAttempt(firstGrok, await reframe(firstGrok.imageDataUrl, firstGrok.aspectRatio))
-  // Round 10: a misspelled pack print always gets the one corrective regeneration (then the caller falls back to productFidelity "exact")
-  const packForced = kept.packText?.status === 'fail' && input.autoRetry !== false
-  // Round 11: a redrawn product (fidelity < 0.7 on the same-view hero) always gets the one corrective regeneration too
-  const lowFidelity = (a: Attempt) => !viewMayChange && a.fidelityCheck.status === 'warning' && a.fidelityCheck.warning.score < FIDELITY_FALLBACK_BELOW && a.fidelityCheck.warning.details.confident === true
-  const fidelityForced = !packForced && lowFidelity(kept) && input.autoRetry !== false
-  if ((input.autoRetry === true && kept.decisionSeverity > 0) || packForced || fidelityForced) {
-    // One corrective regeneration inside the same job: no second approval, no second charge (the caller charges once).
+  // At most ONE regeneration, and ONLY when the caller passed autoRetry:true explicitly (it is disclosed in the approval). Nothing forces one.
+  if (input.autoRetry === true && kept.decisionSeverity > 0) {
     autoRetry.attempted = true
-    if (input.autoRetry !== true) autoRetry.forcedBy = packForced ? 'packText' : 'fidelity'
     autoRetry.reason = hint(kept.qa)
     autoRetry.firstQa = { safeZones: kept.qa.safeZones, textPresent: kept.qa.textPresent, issues: kept.qa.warnings.slice(0, 6) }
     try {
       const second = await runWebPostGrokImage({ ...baseOptions, ...(withRules ? { mcp: mcpRules(autoRetry.reason) } : {}) })
-      totalCost += second.estimatedCostUsd
+      paidCalls.push({ purpose: 'auto_retry', provider: 'xai', model: second.providerModel, costUsd: second.estimatedCostUsd })
       const secondAttempt = await finishAttempt(second, await reframe(second.imageDataUrl, second.aspectRatio))
       autoRetry.firstSeverity = kept.decisionSeverity
       autoRetry.retrySeverity = secondAttempt.decisionSeverity
       if (kept.qa.severityFactors || secondAttempt.qa.severityFactors) autoRetry.factors = { first: kept.qa.severityFactors ?? {}, retry: secondAttempt.qa.severityFactors ?? {} }
-      // Keep the BETTER image by QA result (lower weighted defect score, now including seam / text-over-product / text scale / fidelity / props); a tie keeps the first.
       if (pickBetterBySeverity(kept.decisionSeverity, secondAttempt.decisionSeverity) === 'retry') {
         autoRetry.kept = 'retry'
         autoRetry.keptReason = `retry QA severity ${autoRetry.retrySeverity} < first ${autoRetry.firstSeverity} (lower = fewer defects)`
@@ -753,7 +725,54 @@ export async function generateWebStyleImage(input: WebStyleImageInput): Promise<
       autoRetry.reason = `${autoRetry.reason}; retry failed: ${err instanceof Error ? err.message.slice(0, 160) : 'error'}`
     }
   }
-  const { grok, framed, qa, imageDataUrl, fidelityCheck, packText, propsCheck, unlisted, propsFlagged, propsReason, safeZoneFix, qaBeforeFix, layers, scenePrep, aspectRatio } = kept
+  const { grok, qa, propsCheck, unlisted, propsFlagged, propsReason, safeZoneFix, qaBeforeFix, layers, scenePrep, aspectRatio } = kept
+  let { imageDataUrl, fidelityCheck } = kept
+
+  // ---- printed packs: swap the REAL pack pixels into the located box (deterministic; never another generation) ----
+  let packSwap: PackSwapReport | undefined
+  if (packOffer && !composite && !viewMayChange && grok.lockApplied && imageDataUrl.startsWith('data:')) {
+    const refIndex = fidelityCheck.status === 'ok' ? fidelityCheck.details.referenceIndex : fidelityCheck.status === 'warning' ? fidelityCheck.warning.details.referenceIndex : 0
+    const reference = grok.productReferenceDataUrls[refIndex] ?? grok.productReferenceDataUrls[0]
+    // One Gemini segmentation only when the local flood cannot cut the photo (no gateway configured → flood only).
+    const ledger = input.segmentGateway ? null : (() => { try { return withCostLedger(createModelGateway()) } catch { return null } })()
+    try {
+      const swapped = await swapRealPackPixels({ generated: decode(imageDataUrl), referenceDataUrl: reference ?? '', productBox: productBoxOf(fidelityCheck), confident: locatedConfidently(fidelityCheck), gateway: input.segmentGateway ?? ledger ?? undefined })
+      packSwap = swapped.report
+      if (swapped.report.applied) {
+        const before = fidelityCheck.status === 'ok' || fidelityCheck.status === 'warning' ? fidelityCheck.score : undefined
+        imageDataUrl = `data:image/jpeg;base64,${swapped.bytes.toString('base64')}`
+        fidelityCheck = await checkGeneratedProductFidelity({ referenceDataUrls: grok.productReferenceDataUrls, generatedDataUrl: imageDataUrl, tolerateViewChange: true })
+        if (typeof before === 'number') packSwap.reason += ` (fidelity ${before} before the swap)`
+      } else qa.warnings.push(`pack swap skipped: ${swapped.report.reason}`)
+    } catch (err) {
+      packSwap = { applied: false, reason: `pack swap unavailable: ${err instanceof Error ? err.message.slice(0, 120) : 'error'} — the generated image is kept` }
+      qa.warnings.push(packSwap.reason)
+    }
+    for (const e of ledger?.ledger ?? []) if (e.ok && e.costUsd > 0) paidCalls.push({ purpose: 'segment', provider: 'gemini', model: e.model, costUsd: e.costUsd })
+  }
+
+  // ---- explicit stamps on the model's ad (stampLogo / stampPrice / vector logo): real asset + exact price, nothing else ----
+  let stamped: WebStyleImageOutput['stamped']
+  if ((stampLogo || priceLine) && imageDataUrl.startsWith('data:')) {
+    const picked = stampLogo ? await loadAdLogo(kit, fetchBytes) : null
+    try {
+      const out = await layoutAdLayers({
+        bytes: decode(imageDataUrl),
+        ratio: ratioPlan.requested,
+        logo: picked?.bytes ?? null,
+        blocks: priceLine ? { price: priceLine } : {},
+        palette: { primary: kit?.primaryColor, secondary: kit?.secondaryColor, accent: kit?.accentColor },
+        fonts: { headingFont: kit?.fontPrimary ?? null, bodyFont: null },
+        avoid: productBoxOf(fidelityCheck) ? [productBoxOf(fidelityCheck)!] : [],
+      })
+      imageDataUrl = `data:image/jpeg;base64,${out.bytes.toString('base64')}`
+      stamped = { logo: out.report.logo.status === 'drawn', ...(priceLine ? { price: priceLine } : {}), reason: input.stampLogo === true || input.stampPrice === true ? 'requested (stampLogo / stampPrice)' : 'the kit logo is a vector file and cannot be a model reference' }
+      if (stampLogo && out.report.logo.status !== 'drawn') qa.warnings.push(`logo stamp: ${out.report.logo.reason ?? picked?.notes[0] ?? 'logo not drawn'}`)
+    } catch (err) {
+      qa.warnings.push(`stamp unavailable: ${err instanceof Error ? err.message.slice(0, 120) : 'error'}`)
+    }
+  }
+
   // Round 8: a facts line that fitted on the image is not repeated as overflow
   const extraFact = scenePrep?.extraFactUsed
   const overflowFinal = (capped?.overflow ?? []).filter((l) => l !== extraFact)
@@ -763,19 +782,8 @@ export async function generateWebStyleImage(input: WebStyleImageInput): Promise<
     qa.removedClaims = removedClaims
     qa.warnings.push(`removed claim(s) the brand kit / platform forbids from the offer text and the copy (never sent to the model or drawn): ${removedClaims.map((c) => `"${c}"`).join(', ')} (qa.removedClaims)`)
   }
-  // The fidelity warning survived the (single) retry: say what to do — the real-pixels path with the same code layers (productFidelity "exact").
-  // Round 8: only for the plane (same-view real pixels make sense for it); never for a box / pouch / controller photo, where the real-pixel cut-out cannot compose the box art
-  const packOffer = isPackProduct([offerRaw?.name, offerRaw?.type, offerRaw?.productDescription, offerRaw?.technicalSpecs, input.productNotes])
-  const suggestedFallback: WebStyleImageOutput['suggestedFallback'] = packText?.status === 'fail'
-    ? { productFidelity: 'exact', reason: `${packText.reason}${autoRetry.attempted ? ' after the one automatic retry' : ''}: re-run with productFidelity:"exact" (real product pixels, the printing is never redrawn${packOffer ? '; it is the default for packs when productFidelity is omitted' : ''})` }
-    : productKind === 'plane' && !viewMayChange && fidelityCheck.status === 'warning' && fidelityCheck.warning.score < FIDELITY_RETRY_BELOW
-    ? { productFidelity: 'exact', reason: `the product still differs from the reference photo (fidelity ${fidelityCheck.warning.score} < ${FIDELITY_RETRY_BELOW})${autoRetry.attempted ? ' after the one automatic retry' : ''}: re-run with productFidelity:"exact" (real product pixels + the same logo / text / CTA layers) — it is not run automatically because it is a second paid generation` }
-    : undefined
-  const fidelityFallback: WebStyleImageOutput['fidelityFallback'] = lowFidelity(kept) && fidelityCheck.status === 'warning'
-    ? { score: fidelityCheck.warning.score, reason: `the product was redrawn (fidelity ${fidelityCheck.warning.score} < ${FIDELITY_FALLBACK_BELOW} vs the reference photo${autoRetry.attempted ? ', after the one automatic retry' : ''})`, ...(fidelityCheck.warning.details.productBox ? { productBox: fidelityCheck.warning.details.productBox } : {}) }
-    : undefined
+  const totalCost = paidCalls.reduce((s, c) => s + c.costUsd, 0)
   return {
-    ...(fidelityFallback ? { fidelityFallback } : {}),
     generated: {
       imageDataUrl,
       providerModel: grok.providerModel,
@@ -786,6 +794,7 @@ export async function generateWebStyleImage(input: WebStyleImageInput): Promise<
       mode: grok.mode,
       lockApplied: grok.lockApplied,
     },
+    paidCalls,
     prompt: grok.prompt,
     request: grok.request,
     referenceCount: grok.referenceCount,
@@ -807,8 +816,8 @@ export async function generateWebStyleImage(input: WebStyleImageInput): Promise<
     },
     ...(propsFlagged ? { props_warning: { code: 'props_warning' as const, reason: propsReason, clusters: propsCheck?.clusters ?? [], ...(unlisted.length ? { unlisted: unlisted.map((u) => ({ label: u.label, inliers: u.inliers })) } : {}) } } : {}),
     ...(scenePrep ? { scenePrep } : {}),
-    ...(packText ? { packText } : {}),
-    ...(suggestedFallback ? { suggestedFallback } : {}),
+    ...(packSwap ? { packSwap } : {}),
+    ...(stamped ? { stamped } : {}),
     copyNormalised: tidied.changes,
     ...(removedClaims.length ? { removedClaims } : {}),
     copyOverflow: overflowFinal,
@@ -817,14 +826,14 @@ export async function generateWebStyleImage(input: WebStyleImageInput): Promise<
     ...(qaBeforeFix ? { qaBeforeFix } : {}),
     ...(layers ? { compositeLayers: layers } : {}),
     caption: buildCaption({ onImage: onImageFinal, overflow: overflowFinal, cta: ctaText, language }),
-    // Round 9: the raw generation (Grok's scene before any reframe / scene prep / compositing) of the kept attempt — the caller stores it next to the final.
+    // Round 9: the raw generation (before any reframe / swap / stamp / compositing) of the kept attempt — the caller stores it next to the final.
     rawScene: { imageDataUrl: grok.imageDataUrl },
     ...(withRules && scopedLock.dropped.length ? { lockScope: { role: input.productPhotoRole ?? null, kept: scopedLock.attrs, dropped: scopedLock.dropped } } : {}),
   }
 }
 
 /** Compact, result-safe summary of the post-check (no image bytes). */
-export function postCheckSummary(out: Pick<WebStyleImageOutput, 'fidelityCheck' | 'fidelity_warning' | 'qa' | 'copySource' | 'referenceCount' | 'retriedWithClamp' | 'autoRetry' | 'references' | 'propsPolicy' | 'copyNormalised'> & Partial<Pick<WebStyleImageOutput, 'props_warning' | 'copyOverflow' | 'providerRetries' | 'safeZoneFix' | 'qaBeforeFix' | 'caption' | 'compositeLayers' | 'scenePrep' | 'suggestedFallback' | 'packText'>>): Record<string, unknown> {
+export function postCheckSummary(out: Pick<WebStyleImageOutput, 'fidelityCheck' | 'fidelity_warning' | 'qa' | 'copySource' | 'referenceCount' | 'retriedWithClamp' | 'autoRetry' | 'references' | 'propsPolicy' | 'copyNormalised'> & Partial<Pick<WebStyleImageOutput, 'props_warning' | 'copyOverflow' | 'providerRetries' | 'safeZoneFix' | 'qaBeforeFix' | 'caption' | 'compositeLayers' | 'scenePrep' | 'packSwap' | 'stamped' | 'paidCalls'>>): Record<string, unknown> {
   return {
     ...(out.fidelity_warning ? { fidelity_warning: out.fidelity_warning } : {}),
     fidelityCheck: out.fidelityCheck.status === 'skipped'
@@ -846,8 +855,9 @@ export function postCheckSummary(out: Pick<WebStyleImageOutput, 'fidelityCheck' 
     ...(out.safeZoneFix ? { safeZoneFix: out.safeZoneFix } : {}),
     ...(out.compositeLayers ? { compositeLayers: out.compositeLayers } : {}),
     ...(out.scenePrep ? { scenePrep: out.scenePrep } : {}),
-    ...(out.packText ? { packText: out.packText } : {}),
-    ...(out.suggestedFallback ? { suggestedFallback: out.suggestedFallback } : {}),
+    ...(out.packSwap ? { packSwap: out.packSwap } : {}),
+    ...(out.stamped ? { stamped: out.stamped } : {}),
+    ...(out.paidCalls ? { paidCalls: out.paidCalls } : {}),
     ...(out.qaBeforeFix ? { qaBeforeFix: out.qaBeforeFix } : {}),
     ...(out.caption ? { caption: out.caption } : {}),
   }

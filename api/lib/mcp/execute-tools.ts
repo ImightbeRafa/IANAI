@@ -20,16 +20,52 @@ import { scriptsToSectionsDto } from '../guiones/script-output.js'
 import { GROK_TEXT_MODEL } from '../grok-models.js'
 import type { AspectRatio } from '../adpack/types.js'
 import { generateExactWebStyleAd } from './exact-flow.js'
-import { inferAssetRole, roleFromRequestText, stripRolePrefix } from '../adpack/fidelity/photos.js'
-import { generateWebStyleImage, offerLockFromRow, pickAccessoryPhotos, postCheckSummary } from './web-image.js'
+import { inferAssetRole, stripRolePrefix } from '../adpack/fidelity/photos.js'
+import { generateWebStyleImage, offerLockFromRow, pickAccessoryPhotos, postCheckSummary, type PaidCall } from './web-image.js'
 import type { McpOfferStore } from './offer-tools.js'
 import { resolveImageRatio } from '../image-ratios.js'
-import { createModelGateway } from '../adpack/gateway.js'
+import { createModelGateway, withCostLedger, type LedgerEntry } from '../adpack/gateway.js'
 import { isPackProduct } from './product-kind.js'
 
-/** Round 10: warning returned when productFidelity "generated" is passed explicitly for a printed pack / pouch. */
-export function packGeneratedWarning(): string {
-  return 'productFidelity "generated" was passed for a printed pack / pouch: the model redraws the printing and often misspells it (round 9: "Piok-Me-Up", garbled small print). Omit productFidelity (defaults to "exact" for packs) or pass "exact"; a misspelling found by the OCR check triggers one regeneration and then the exact fallback (packFallback)'
+/** 0.26.0: note returned when productFidelity is passed for a printed pack / pouch / box (deprecated there, ignored, no extra charge). */
+export function packFidelityDeprecatedNote(passed: 'exact' | 'generated'): string {
+  return `productFidelity "${passed}" is deprecated and ignored for printed packs / pouches / boxes: the model designs the whole ad with the real pack photo as the reference, then the REAL pack pixels are swapped into the located box (packSwap; no extra generation, no extra charge)`
+}
+
+/** 0.26.0: approval text for an explicit autoRetry:true (the one possible extra paid generation is disclosed before the user approves). */
+export function autoRetryDisclosure(language: 'es' | 'en' = 'es'): string {
+  return language === 'en'
+    ? 'autoRetry: if the free quality check finds a defect, ONE extra paid generation may run (same job; its provider cost is logged; no extra credits are charged)'
+    : 'autoRetry: si el control de calidad gratuito encuentra un defecto, puede correr UNA generación paga extra (mismo trabajo; su costo de proveedor queda registrado; no se cobran créditos extra)'
+}
+
+/** Ledger entry (adpack gateway) → paid call row. */
+export function paidCallFromLedger(e: LedgerEntry): PaidCall {
+  return { purpose: e.kind === 'segment' ? 'segment' : 'generate', provider: e.kind === 'scene' || e.kind === 'edit' || e.kind === 'json' ? 'xai' : 'gemini', model: e.model, costUsd: e.costUsd }
+}
+
+/** One api_usage_logs row per paid provider call (0.26.0: the logged cost is the real cost, never only the last attempt). */
+export async function logPaidCalls(options: {
+  user: { id: string; email?: string | null }
+  generationId: string
+  calls: PaidCall[]
+  metadata: Record<string, unknown>
+}): Promise<void> {
+  const calls = options.calls.length ? options.calls : []
+  for (let i = 0; i < calls.length; i++) {
+    const c = calls[i]
+    await logApiUsage({
+      userId: options.user.id,
+      userEmail: options.user.email || undefined,
+      feature: 'image',
+      model: c.model,
+      success: true,
+      costOverrideUsd: c.costUsd,
+      generationId: options.generationId,
+      source: 'mcp',
+      metadata: { ...options.metadata, paidCall: { index: i + 1, of: calls.length, purpose: c.purpose, provider: c.provider } },
+    })
+  }
 }
 import { parseImageFidelityArgs, photosFromUrls, resolveToolProductFidelity } from '../adpack/fidelity/pipeline.js'
 import { normalizeImageReferenceRole } from '../image-prompt-context.js'
@@ -171,15 +207,16 @@ async function resolveOwnedReferenceImages(options: {
   return images
 }
 
-/** Round 11: the productFidelity a job will resolve to (same rule as runImageGenerateBody: explicit wins; a printed pack whose hero is not a box / part photo → "exact"). */
-export function resolveQuotedProductFidelity(o: { explicit?: 'exact' | 'generated'; ctx: { offers: Array<{ id: string; name?: string | null; type?: string | null; productDescription?: string | null; technicalSpecs?: string | null }> }; offerId: string; productAssets: McpOwnedImage[]; productImageId?: string; productNotes?: string }): 'exact' | 'generated' {
-  if (o.explicit) return o.explicit
-  const offer = o.ctx.offers.find((x) => x.id === o.offerId)
-  const sku = o.productImageId ? o.productAssets.find((i) => i.id === o.productImageId) : undefined
-  const role = sku ? (inferAssetRole(sku)) : undefined
-  const pack = isPackProduct([offer?.name ?? undefined, offer?.type ?? undefined, offer?.productDescription ?? undefined, offer?.technicalSpecs ?? undefined, o.productNotes])
-  const hasPhoto = o.productAssets.length > 0 || Boolean(o.productImageId)
-  return pack && hasPhoto && !(role && ['box', 'contents', 'part'].includes(role)) ? 'exact' : 'generated'
+/** True when the offer is a printed pack / pouch / box (product-kind heuristics on the offer text + productNotes). */
+export function offerIsPack(ctx: { offers: Array<{ id: string; name?: string | null; type?: string | null; productDescription?: string | null; technicalSpecs?: string | null }> }, offerId: string, productNotes?: string): boolean {
+  const offer = ctx.offers.find((x) => x.id === offerId)
+  return isPackProduct([offer?.name ?? undefined, offer?.type ?? undefined, offer?.productDescription ?? undefined, offer?.technicalSpecs ?? undefined, productNotes])
+}
+
+/** The productFidelity a job will resolve to (same rule as runImageGenerateBody): printed packs → always "generated" (+ real-pixel swap); else explicit wins, default "generated". */
+export function resolveQuotedProductFidelity(o: { explicit?: 'exact' | 'generated'; ctx: Parameters<typeof offerIsPack>[0]; offerId: string; productNotes?: string }): 'exact' | 'generated' {
+  if (offerIsPack(o.ctx, o.offerId, o.productNotes)) return 'generated'
+  return o.explicit ?? 'generated'
 }
 
 async function resolveOwnedReferenceUrls(options: {
@@ -329,6 +366,8 @@ export function parseWebPostArgs(args: Record<string, unknown>): {
   enforceSafeZones?: boolean
   compositeLayers?: boolean
   productNotes?: string
+  stampLogo?: boolean
+  stampPrice?: boolean
 } {
   const out: ReturnType<typeof parseWebPostArgs> = {}
   const copy = optionalTrimmedString(args.copy ?? args.scriptText, 1200)
@@ -355,10 +394,13 @@ export function parseWebPostArgs(args: Record<string, unknown>): {
   // Always echoed (boundInput / executeArguments) so the caller sees the value that is actually applied, defaults included.
   out.autoRetry = args.autoRetry === true
   out.layoutCap = args.layoutCap !== false
-  out.compositeLayers = args.compositeLayers !== false
-  // Composite flow (default): the layout puts everything inside the safe zones, so the scale-in is OFF unless explicitly requested. 
-  // Round 8: the scale-in canvas is opt-in everywhere (explicit true); with compositeLayers it is ignored (never runs) even when true.
+  // 0.26.0: the model designs the whole ad by default (web parity); the scene-only + code-layout flow is an explicit opt-in.
+  out.compositeLayers = args.compositeLayers === true
+  // The scale-in canvas is opt-in everywhere (explicit true); with compositeLayers it is ignored (never runs) even when true.
   out.enforceSafeZones = args.enforceSafeZones === true
+  // 0.26.0: code stamps the real logo / the price on the model's ad only on request.
+  out.stampLogo = args.stampLogo === true
+  out.stampPrice = args.stampPrice === true
   return out
 }
 
@@ -722,8 +764,9 @@ export async function mcpExecuteImageGenerate(options: {
   })
   // Validate aspect early (fail before approval if unsupported). 1:1 / 4:5 / 9:16 / 16:9 always work (F3).
   resolveImageRatio(boundInput.aspectRatio)
-  // Exact product mode needs a product photo: fail before approval when explicitly asked without one.
-  resolveToolProductFidelity(fidelityArgs.productFidelity, productAssets.length > 0 || Boolean(productImageId))
+  const pack = offerIsPack(ctxPreview, offerId, webArgs.productNotes)
+  // Exact product mode needs a product photo: fail before approval when explicitly asked without one (packs ignore productFidelity).
+  resolveToolProductFidelity(fidelityArgs.productFidelity, productAssets.length > 0 || Boolean(productImageId), { pack })
   await resolveOwnedReferenceUrls({
     artifactStore: options.artifactStore,
     userId: options.user.id,
@@ -731,12 +774,14 @@ export async function mcpExecuteImageGenerate(options: {
     offerId,
     imageIds: selectedReferenceIds,
   })
-  // Round 11: the quote / approval reports the productFidelity the job will ACTUALLY use (a printed pack defaults to "exact"), not 'generated'
-  const quotedFidelity = resolveQuotedProductFidelity({ explicit: fidelityArgs.productFidelity, ctx: ctxPreview, offerId, productAssets, productImageId, productNotes: fidelityArgs.productNotes })
+  // The quote / approval reports the productFidelity the job will ACTUALLY use (printed packs: always "generated" + the real-pixel swap).
+  const quotedFidelity = resolveQuotedProductFidelity({ explicit: fidelityArgs.productFidelity, ctx: ctxPreview, offerId, productNotes: webArgs.productNotes })
   const boundWithOffer = { ...boundInput, productFidelity: quotedFidelity, offerId }
 
   if (!approvalRequestId) {
     const quote = quoteLegacyActionCredits('image', 'grok-imagine')
+    // 0.26.0: an explicit autoRetry:true is disclosed in the approval text (one possible extra paid generation) before the user approves.
+    const retryNote = webArgs.autoRetry ? { summaryEs: `Generar una imagen con Advance · ${autoRetryDisclosure('es')}`, summaryEn: `Generate an image with Advance · ${autoRetryDisclosure('en')}`, extra: { possibleExtraGeneration: { count: 1, reason: 'autoRetry', extraCredits: 0, providerCostLogged: true } } } : {}
     return issueMcpChatApproval({
       approvalStore: options.approvalStore,
       userId: options.user.id,
@@ -744,6 +789,7 @@ export async function mcpExecuteImageGenerate(options: {
       input: boundWithOffer,
       quotedCreditCost: quote,
       appOrigin: options.appOrigin,
+      ...retryNote,
     })
   }
 
@@ -870,6 +916,8 @@ async function runImageGenerateBody(options: {
   layoutCap?: boolean
   enforceSafeZones?: boolean
   compositeLayers?: boolean
+  stampLogo?: boolean
+  stampPrice?: boolean
   productNotes?: string
 }): Promise<Record<string, unknown>> {
   const imageStarted = Date.now()
@@ -912,79 +960,76 @@ async function runImageGenerateBody(options: {
   // exact mode composites real pixels of every selected photo, so it keeps the unsplit product list.
   const exactProductUrls = partitionOwnedImageRefs({ images: ownedRefs, productImageId: options.productImageId }).productUrls
 
-  // Round 9: a printed pouch / pack defaults to the real-pixel path (Grok misspells its printing); the hero must be the pack itself, not a box / part photo.
-  const offerForKind = options.ctxPreview.offers.find((o) => o.id === options.offerId)
-  const heroRoleForKind = (() => { const sku = ownedRefs.find((i) => i.id === options.productImageId?.trim()); return sku ? (inferAssetRole(sku)) : undefined })()
-  const packDefault = isPackProduct([offerForKind?.name, offerForKind?.type, offerForKind?.productDescription, offerForKind?.technicalSpecs, options.productNotes]) && !(heroRoleForKind && ['box', 'contents', 'part'].includes(heroRoleForKind))
-  const fidelityMode = resolveToolProductFidelity(options.productFidelity, productUrls.length > 0, { defaultExact: packDefault })
-  // Round 10: an explicit "generated" on a printed pack is honoured but warned about (Grok misspells pack printing; round 9 SP / PH)
-  const packOffer = isPackProduct([offerForKind?.name, offerForKind?.type, offerForKind?.productDescription, offerForKind?.technicalSpecs, options.productNotes])
-  const productFidelityWarning = options.productFidelity === 'generated' && packDefault ? packGeneratedWarning() : undefined
-  let packFallback: { from: 'generated'; to: 'exact'; reason: string; failed?: boolean; generatedQa?: unknown } | undefined
-  let fidelityFallback: { from: 'generated'; to: 'exact'; score: number; reason: string; failed?: boolean; generatedQa?: unknown } | undefined
-  const fidelityDefaultNote = !options.productFidelity && fidelityMode === 'exact' ? 'productFidelity defaulted to "exact" for a printed pack / pouch (real product pixels, the printing is never redrawn); pass productFidelity:"generated" to let the model redraw it' : undefined
+  // 0.26.0: printed packs / pouches / boxes have no paid exact-vs-generated choice: always the model-designed ad + the real-pixel swap
+  // (productFidelity is deprecated and ignored there). Anything else: explicit "exact" stays an opt-in, the default is "generated".
+  const packOffer = offerIsPack(options.ctxPreview, options.offerId, options.productNotes)
+  const fidelityMode = resolveToolProductFidelity(options.productFidelity, productUrls.length > 0, { pack: packOffer })
+  const productFidelityNote = packOffer && options.productFidelity ? packFidelityDeprecatedNote(options.productFidelity) : undefined
   let fidelity: Record<string, unknown> | null = null
   let promptUsed = prompt
   let postCheck: Record<string, unknown> | null = null
   let rawSceneDataUrl: string | undefined
+  let paidCalls: PaidCall[] = []
   let generated: { imageDataUrl: string; providerModel: string; estimatedCostUsd: number; resolution: string; quality: string; aspectRatio: string; mode: string; lockApplied: boolean }
-  const runExact = async (region?: { x0: number; y0: number; x1: number; y1: number }) => {
-    // Real product pixels on a generated plate (A1), then the SAME ad layers as the web-style flow: copy / one CTA / logo /
-    // safe zones / QA / halo flags (api/lib/mcp/exact-flow.ts). Never a redrawn product; flags are warnings only.
-    const offerName = options.ctxPreview.offers.find((o) => o.id === options.offerId)?.name || options.offerId
-    const exactAd = await generateExactWebStyleAd({
-      exact: {
-        gateway: createModelGateway(),
-        photos: photosFromUrls(exactProductUrls),
-        ratio: appliedAspectRatio,
-        brandName: options.ctxPreview.brand.name,
-        offerName,
-        language: 'es',
-        sceneHint: [options.scene, options.guidePrompt].filter(Boolean).join('. '),
-        styleNotes: kit?.visualStyleNotes || undefined,
-        palette: [kit?.primaryColor, kit?.secondaryColor, kit?.accentColor].filter((c): c is string => Boolean(c)),
-        allowedProps: options.allowedProps,
-        // Round 12: the MCP lock is strict (forbidExtraProps): no plant / blanket in the exact plate either
-        strictProps: true,
-        ...(region ? { region } : {}),
-        ...(options.immutableAttributes?.length || options.productNotes ? { immutableAttributes: [...(options.immutableAttributes ?? []), ...(options.productNotes ? [options.productNotes] : [])] } : {}),
-        ...(options.relight === 'ai' ? { relight: 'ai' as const } : {}),
-      },
-      ctx: options.ctxPreview,
-      offerId: options.offerId,
-      copy: options.copy,
-      guidePrompt: options.guidePrompt,
-      ratio: appliedAspectRatio as AspectRatio,
-      language: 'es',
-      layoutCap: options.layoutCap,
-    })
-    fidelity = exactAd.fidelity
-    rawSceneDataUrl = exactAd.rawSceneDataUrl
-    generated = {
-      imageDataUrl: exactAd.imageDataUrl,
-      providerModel: exactAd.plateModel || 'grok-imagine',
-      estimatedCostUsd: exactAd.costUsd,
-      resolution: `${exactAd.width}x${exactAd.height}`,
-      quality: 'medium',
-      aspectRatio: appliedAspectRatio,
-      mode: 'exact_composite',
-      lockApplied: true,
-    }
-    postCheck = {
-      qa: exactAd.qa,
-      halo: exactAd.halo,
-      ...(exactAd.halo_warning ? { halo_warning: exactAd.halo_warning } : {}),
-      copyOnImage: exactAd.copyOnImage,
-      ...(exactAd.copyOverflow.length ? { copyOverflow: exactAd.copyOverflow } : {}),
-      exactLayout: exactAd.layout,
-      compositeLayers: exactAd.compositeLayers,
-      ...(exactAd.warnings.length ? { exactWarnings: exactAd.warnings } : {}),
-      ...(exactAd.providerRetries ? { providerRetries: exactAd.providerRetries } : {}),
-      accessories: 'not composited in exact mode (real box / controller photos are only used by productFidelity "generated")',
-    }
-  }
   if (fidelityMode === 'exact') {
-    await runExact()
+    // Explicit opt-in: real product pixels on a generated plate (A1), then the same code layers (api/lib/mcp/exact-flow.ts). One run; every
+    // paid call (plates, plate checks, segmentation) is recorded by the ledger and logged one row each.
+    const offerName = options.ctxPreview.offers.find((o) => o.id === options.offerId)?.name || options.offerId
+    const gateway = withCostLedger(createModelGateway())
+    try {
+      const exactAd = await generateExactWebStyleAd({
+        exact: {
+          gateway,
+          photos: photosFromUrls(exactProductUrls),
+          ratio: appliedAspectRatio,
+          brandName: options.ctxPreview.brand.name,
+          offerName,
+          language: 'es',
+          sceneHint: [options.scene, options.guidePrompt].filter(Boolean).join('. '),
+          styleNotes: kit?.visualStyleNotes || undefined,
+          palette: [kit?.primaryColor, kit?.secondaryColor, kit?.accentColor].filter((c): c is string => Boolean(c)),
+          allowedProps: options.allowedProps,
+          // Round 12: the MCP lock is strict (forbidExtraProps): no plant / blanket in the exact plate either
+          strictProps: true,
+          ...(options.immutableAttributes?.length || options.productNotes ? { immutableAttributes: [...(options.immutableAttributes ?? []), ...(options.productNotes ? [options.productNotes] : [])] } : {}),
+          ...(options.relight === 'ai' ? { relight: 'ai' as const } : {}),
+        },
+        ctx: options.ctxPreview,
+        offerId: options.offerId,
+        copy: options.copy,
+        guidePrompt: options.guidePrompt,
+        ratio: appliedAspectRatio as AspectRatio,
+        language: 'es',
+        layoutCap: options.layoutCap,
+      })
+      fidelity = exactAd.fidelity
+      rawSceneDataUrl = exactAd.rawSceneDataUrl
+      generated = {
+        imageDataUrl: exactAd.imageDataUrl,
+        providerModel: exactAd.plateModel || 'grok-imagine',
+        estimatedCostUsd: exactAd.costUsd,
+        resolution: `${exactAd.width}x${exactAd.height}`,
+        quality: 'medium',
+        aspectRatio: appliedAspectRatio,
+        mode: 'exact_composite',
+        lockApplied: true,
+      }
+      postCheck = {
+        qa: exactAd.qa,
+        halo: exactAd.halo,
+        ...(exactAd.halo_warning ? { halo_warning: exactAd.halo_warning } : {}),
+        copyOnImage: exactAd.copyOnImage,
+        ...(exactAd.copyOverflow.length ? { copyOverflow: exactAd.copyOverflow } : {}),
+        exactLayout: exactAd.layout,
+        compositeLayers: exactAd.compositeLayers,
+        ...(exactAd.warnings.length ? { exactWarnings: exactAd.warnings } : {}),
+        accessories: 'not composited in exact mode (real box / controller photos are only used by productFidelity "generated")',
+      }
+    } finally {
+      paidCalls = gateway.ledger.filter((e) => e.costUsd > 0).map(paidCallFromLedger)
+    }
+    const ledgerCost = Math.round(paidCalls.reduce((s, c) => s + c.costUsd, 0) * 10000) / 10000
+    if (ledgerCost > 0) generated.estimatedCostUsd = ledgerCost
   } else {
     // Web path: same prompt/refs/logo/lock/clamp-retry as /api/generate-image (api/lib/web-post-image.ts).
     const offerRow = options.offerStore
@@ -1006,8 +1051,7 @@ async function runImageGenerateBody(options: {
       kind: 'product',
     }).catch(() => [])
     // Accessory photos (box / controller / contents): the ones the caller selected explicitly, plus the offer's photos that
-    // match an `allowedProps` entry. Never attached when not allowed (default = no props), so they win reference slots
-    // (budget up to 5 on the MCP path: hero + 2nd product photo + accessories + logo).
+    // match an `allowedProps` entry. Never attached when not allowed (default = no props).
     const accessoryRows = [...selectedAccessories, ...pickAccessoryPhotos(allProductAssets, {
       excludeIds: [...options.referenceImageIds, ...selectedAccessories.map((a) => a.id)],
       lockText: (lock.allowedProps || []).join(' '),
@@ -1015,18 +1059,16 @@ async function runImageGenerateBody(options: {
       max: Math.max(0, 2 - selectedAccessories.length),
     })].slice(0, 2)
     const accessories = accessoryRows.map((a) => ({ imageUrl: a.imageUrl, label: a.label }))
-    // The offer's OTHER real box / contents / part photos (not attached): used only to flag them when they show up in the scene without being allowed.
+    // The offer's OTHER real box / contents / part photos (not attached): only used by the compositeLayers opt-in to flag them in the scene.
     const libraryPhotos = pickAccessoryPhotos(allProductAssets, {
       excludeIds: [...options.referenceImageIds, ...accessoryRows.map((a) => a.id)],
       lockText: '',
       max: 3,
     }).map((a) => ({ imageUrl: a.imageUrl, label: a.label }))
     const heroSku = ownedRefs.find((i) => i.id === options.productImageId?.trim()) ?? accessoryRefs.rest.find((i) => i.kind !== 'context' && i.kind !== 'generated')
-    // Round 12: a selected photo with no role data (no tag / role / label) that is NOT the offer's primary photo, while the
-    // request's productNotes / scene name an accessory first ("Control: gamepad negro…"), takes that accessory role.
-    const heroRole = heroSku ? (inferAssetRole(heroSku) ?? (heroSku.isPrimary ? 'hero' : allProductAssets.some((a) => a.id !== heroSku.id && a.isPrimary) ? roleFromRequestText([options.productNotes, options.scene]) : undefined)) : undefined
-    // Round 9: the selected photo is a box / contents / part (e.g. the controller): the offer's MAIN product must not show up — its real photo joins the
-    // "unlisted objects" feature-match check, so a duplicate / extra product in the scene is flagged.
+    // Role of the selected photo: role column / tags / label (inferAssetRole), else primary = hero. 0.26.0: never guessed from the
+    // request text (a "hélice" / "cable" word in productNotes no longer turns an untagged hero into a part).
+    const heroRole = heroSku ? (inferAssetRole(heroSku) ?? (heroSku.isPrimary ? 'hero' : undefined)) : undefined
     if (heroRole && ['box', 'contents', 'part'].includes(heroRole)) {
       const main = allProductAssets.find((a) => a.imageUrl && a.id !== heroSku?.id && (a.isPrimary || inferAssetRole(a) === 'hero') && a.kind !== 'generated' && a.kind !== 'context')
       if (main) libraryPhotos.unshift({ imageUrl: main.imageUrl, label: `producto principal (${main.label || 'foto principal'})` })
@@ -1046,7 +1088,7 @@ async function runImageGenerateBody(options: {
       productUrls,
       productPhotoRole: heroRole,
       // Round 12: the free-text role column ("control negro tipo gamepad") names the object too
-      productPhotoLabel: [heroSku?.label, heroSku?.role].filter((x): x is string => Boolean(x && x.trim())).join(' · ') || (heroRole && heroRole !== 'hero' ? options.productNotes?.split(/[:.;,]/)[0]?.trim().slice(0, 60) || undefined : undefined),
+      productPhotoLabel: [heroSku?.label, heroSku?.role].filter((x): x is string => Boolean(x && x.trim())).join(' · ') || undefined,
       supportUrls,
       referenceMode: options.referenceMode,
       lock,
@@ -1056,36 +1098,16 @@ async function runImageGenerateBody(options: {
       layoutCap: options.layoutCap,
       enforceSafeZones: options.enforceSafeZones,
       compositeLayers: options.compositeLayers,
+      stampLogo: options.stampLogo,
+      stampPrice: options.stampPrice,
       ...(options.productNotes ? { productNotes: options.productNotes } : {}),
     })
     generated = web.generated
+    paidCalls = web.paidCalls
     promptUsed = web.prompt
     postCheck = postCheckSummary(web)
     if (web.lockScope) postCheck = { ...postCheck, lockScope: web.lockScope }
     rawSceneDataUrl = web.rawScene?.imageDataUrl
-    // Round 10: the pack printing is still misspelled after the one regeneration → fall back to the real-pixel path (the printing is never redrawn)
-    if (web.packText?.status === 'fail' && packOffer && exactProductUrls.length) {
-      const genReason = web.packText.reason
-      const genPostCheck = postCheck
-      try {
-        await runExact()
-        packFallback = { from: 'generated', to: 'exact', reason: `${genReason}${web.autoRetry.attempted ? ' after the automatic retry' : ''}: switched to productFidelity "exact" (real product pixels)`, generatedQa: (genPostCheck as { qa?: unknown } | null)?.qa ?? null }
-      } catch (err) {
-        packFallback = { from: 'generated', to: 'exact', failed: true, reason: `exact fallback failed: ${err instanceof Error ? err.message.slice(0, 120) : 'error'} — the generated image (misspelled print) is kept` }
-      }
-    }
-    // Round 11: the product was redrawn (fidelity < 0.7 after the one retry) → the real-pixel path with the same layers
-    else if (web.fidelityFallback && exactProductUrls.length) {
-      const genReason = web.fidelityFallback.reason
-      const genPostCheck = postCheck
-      try {
-        // Round 12: the real product goes where (and as big as) the generated scene put it — same ground line
-        await runExact(web.fidelityFallback.productBox)
-        fidelityFallback = { from: 'generated', to: 'exact', score: web.fidelityFallback.score, reason: `${genReason}: switched to productFidelity "exact" (real product pixels)`, generatedQa: (genPostCheck as { qa?: unknown } | null)?.qa ?? null }
-      } catch (err) {
-        fidelityFallback = { from: 'generated', to: 'exact', score: web.fidelityFallback.score, failed: true, reason: `exact fallback failed: ${err instanceof Error ? err.message.slice(0, 120) : 'error'} — the generated image (redrawn product) is kept` }
-      }
-    }
   }
 
   const persistStarted = Date.now()
@@ -1122,15 +1144,11 @@ async function runImageGenerateBody(options: {
       .catch((err) => ({ finalUrl: saved.imageUrl, note: `raw scene not stored: ${err instanceof Error ? err.message.slice(0, 80) : 'error'}` }))
   } else if (rawSceneDataUrl) raw.note = 'raw scene not stored (store has no raw upload)'
 
-  await logApiUsage({
-    userId: options.user.id,
-    userEmail: options.user.email || undefined,
-    feature: 'image',
-    model: generated.providerModel,
-    success: true,
-    costOverrideUsd: generated.estimatedCostUsd,
+  // One usage row per paid provider call (first generation, the optional retry, segmentation / plates / plate checks), each with its own cost.
+  await logPaidCalls({
+    user: options.user,
     generationId: imageGenerationId,
-    source: 'mcp',
+    calls: paidCalls.length ? paidCalls : [{ purpose: 'generate', provider: 'xai', model: generated.providerModel, costUsd: generated.estimatedCostUsd }],
     metadata: usageTimingMetadata({
       durationMs: Date.now() - imageStarted,
       stageTimings: { imageMs: Date.now() - imageStarted, persistMs: Date.now() - persistStarted },
@@ -1145,6 +1163,7 @@ async function runImageGenerateBody(options: {
         grokMode: generated.mode,
         lockApplied: generated.lockApplied,
         chargedCredits: options.quote,
+        totalCostUsd: generated.estimatedCostUsd,
       },
     }),
   })
@@ -1180,12 +1199,10 @@ async function runImageGenerateBody(options: {
     grokMode: generated.mode,
     lockApplied: generated.lockApplied,
     estimatedCostUsd: generated.estimatedCostUsd,
-    productFidelity: (packFallback && !packFallback.failed) || (fidelityFallback && !fidelityFallback.failed) ? 'exact' : fidelityMode,
-    ...(fidelityDefaultNote ? { productFidelityNote: fidelityDefaultNote } : {}),
-    ...(productFidelityWarning ? { productFidelityWarning } : {}),
-    ...(packFallback ? { packFallback } : {}),
-    ...(fidelityFallback ? { fidelityFallback } : {}),
+    productFidelity: fidelityMode,
+    ...(productFidelityNote ? { productFidelityNote } : {}),
     ...(fidelity ? { fidelity } : {}),
+    paidCalls,
     ...(postCheck || {}),
     raw,
     prompt: promptUsed,

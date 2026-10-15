@@ -97,6 +97,11 @@ export type WebPostPromptInput = {
   productRow?: ProductCreativeRow | null
   /** MCP only. Absent on the web route → the prompt is byte-identical to the legacy one. */
   mcp?: WebPostMcpRules
+  /**
+   * MCP only: the offer lock block (lockRulesBlock), placed right after the MCP rules in the HEAD of the prompt. The clamp keeps the
+   * start of the head plus the copy tail, so the product lock is never the part that gets cut while the copy survives (0.26.0).
+   */
+  lockBlock?: string
 }
 
 /**
@@ -132,6 +137,8 @@ export type WebPostMcpRules = {
   productKind?: 'plane' | 'generic'
   /** Reference slots sent to Grok (the web route is fixed at 3; xAI /images/edits accepts up to 5). MCP only. */
   refBudget?: number
+  /** 0.26.0: printed pack / pouch / box offer (packaging attributes describe the product itself). */
+  packProduct?: boolean
 }
 
 const pct = (v: number) => `${Math.round(v * 100)}%`
@@ -319,6 +326,8 @@ export function buildWebPostSourcePrompt(input: WebPostPromptInput): string {
       if (/^(Texto visible:|Visible text:)/.test(blk)) return [langCode === 'en' ? sceneOnlyEn : sceneOnlyEs]
       if (/^(Precio listado|List price)/.test(blk)) return []
       if (/^(COPY DEL USUARIO|USER COPY)/.test(blk)) return []
+      // 0.26.0: "no product photo → design a typographic ad" contradicts a text-free scene
+      if (/^(Sin foto de producto: diseñá|No product photo: design)/.test(blk)) return []
       // Round 8: the logo IS applied (by code, after the scene): the generic "no logo file attached" line contradicted that
       if (/^REGLA — LOGO: no hay archivo de logo adjunto/.test(blk)) return ['REGLA — LOGO: el logo de la marca se agrega después por código. NO dibujes ningún logo, wordmark ni subtítulo de marca en la escena.']
       if (/^LOGO RULE: no logo file attached/.test(blk)) return ['LOGO RULE: the brand logo is added afterwards, in code. Do NOT draw any logo, wordmark or brand subtitle in the scene.']
@@ -332,9 +341,9 @@ export function buildWebPostSourcePrompt(input: WebPostPromptInput): string {
       .replace(/\s*→\s*CTA\b/g, '')
       .replace(/,\s*1 CTA\b/g, '')
   }
-  // MCP rules go FIRST: the prompt clamp trims the tail of the head, never the opening instructions.
+  // MCP rules (then the offer lock) go FIRST: the prompt clamp trims the tail of the head, never the opening instructions.
   const rules = buildMcpPromptRules(langCode, mcp, { hasProductRefs: input.hasProductRefs })
-  return [rules, body].filter(Boolean).join('\n\n')
+  return [rules, (input.lockBlock || '').trim(), body].filter(Boolean).join('\n\n')
 }
 
 /** Product refs first, brand logo as style ref, scene refs last; capped at 3. */
@@ -463,10 +472,8 @@ export type WebPostGrokImageOptions = {
   brandKitId?: string | null
   offerId?: string | null
   productRow?: ProductCreativeRow | null
-  /** https (or data:) product photos, confirmed ones first. */
+  /** https (or data:) product photos the user confirmed (by id), hero first. The ONLY product refs: kit reference images are never appended (0.26.0). */
   productUrls: string[]
-  /** Brand-kit product reference photos auto-appended as product refs (web `appendKitProductReferenceImages`). */
-  kitReferenceUrls?: string[]
   /** Scene / style refs the user confirmed. */
   supportUrls?: string[]
   logoUrl?: string | null
@@ -498,8 +505,8 @@ export type WebPostGrokImageResult = {
   /** Product reference photos (data URLs) the request carried — for the local fidelity post-check. */
   productReferenceDataUrls: string[]
   /** Which kinds of references made the 3-slot budget, in request order. */
-  referencesUsed: Array<'product' | 'accessory' | 'kit' | 'logo' | 'scene'>
-  /** Optional references (kit / accessory / scene) that could not be loaded: url + HTTP status or reason. */
+  referencesUsed: Array<'product' | 'accessory' | 'logo' | 'scene'>
+  /** Optional references (accessory / scene) that could not be loaded: url + HTTP status or reason. */
   referenceWarnings: ReferenceImageFailure[]
   /** Transient provider failures retried inside the job (capacity / 5xx); 0 normally. Not an error, not charged. */
   providerRetries: number
@@ -526,11 +533,18 @@ function uniqueUrls(urls: Array<string | null | undefined>, max: number): string
 
 /** Offer attributes that describe a separate object (box, controller, cable…) rather than the product itself. */
 const ACCESSORY_ATTR_RE = /\b(caja|box|empaque|packaging|control|gamepad|mando|remote|cable|usb|cargador|charger|manual|estuche|bolsa|pouch)\b/i
+/** For a printed pack / pouch / box offer the packaging IS the product: only real separate objects count as accessories. */
+const ACCESSORY_ATTR_PACK_RE = /\b(control|gamepad|mando|remote|cable|usb|cargador|charger|manual)\b/i
+
+/** True when an offer attribute describes a separate object (box, controller, cable…) rather than the product itself. */
+export function isAccessoryAttribute(attr: string, packProduct = false): boolean {
+  return (packProduct ? ACCESSORY_ATTR_PACK_RE : ACCESSORY_ATTR_RE).test(attr)
+}
 
 export function lockRulesBlock(
   language: 'es' | 'en',
   lock: { lockProductAppearance?: boolean; immutableAttributes?: string[] },
-  opts: { strict?: boolean; accessoriesAttached?: boolean } = {}
+  opts: { strict?: boolean; accessoriesAttached?: boolean; /** 0.26.0: printed pack offer — 'bolsa azul' describes the product, never an accessory to leave out. */ packProduct?: boolean } = {}
 ): string {
   const attrs = (lock.immutableAttributes || []).map((a) => a.trim()).filter(Boolean)
   if (!lock.lockProductAppearance && attrs.length === 0) return ''
@@ -542,8 +556,8 @@ export function lockRulesBlock(
       : `PRODUCT LOCKED by the offer: shape, colour, parts and branding identical to the reference photo; do not invent variants.${list}`
   }
   // Strict (MCP): attributes about other objects must not invite the model to draw them from imagination.
-  const own = attrs.filter((a) => !ACCESSORY_ATTR_RE.test(a))
-  const other = attrs.filter((a) => ACCESSORY_ATTR_RE.test(a))
+  const own = attrs.filter((a) => !isAccessoryAttribute(a, opts.packProduct))
+  const other = attrs.filter((a) => isAccessoryAttribute(a, opts.packProduct))
   const ownList = own.length ? ` ${es ? 'Atributos inmutables' : 'Immutable attributes'}: ${own.join('; ')}.` : ''
   const otherList = other.length
     ? (opts.accessoriesAttached
@@ -577,21 +591,20 @@ export async function runWebPostGrokImage(options: WebPostGrokImageOptions): Pro
   const scope: BloomSkuScope = { productId: options.offerId ?? null, brandKitId: options.brandKitId ?? null }
   const row = options.productRow || null
 
-  // Reference hydration — confirmed product photos first, then real accessory photos, then kit refs (4 slots max).
+  // Reference hydration — confirmed product photos first, then real accessory photos (4 slots max). Confirmed IDs only:
+  // the brand kit's reference images are never silently added as product refs (0.26.0).
   const confirmed = uniqueUrls(options.productUrls, MAX_INPUT_SLOTS)
   const supportUrls = uniqueUrls(options.supportUrls || [], MAX_INPUT_SLOTS)
   const slotsLeft = Math.max(0, MAX_INPUT_SLOTS - confirmed.length - supportUrls.length)
   const accessoryUrls = uniqueUrls(options.accessoryUrls || [], Math.min(2, slotsLeft)).filter((u) => !confirmed.includes(u))
-  const kitUrls = uniqueUrls(options.kitReferenceUrls || [], Math.max(0, slotsLeft - accessoryUrls.length)).filter((u) => !confirmed.includes(u) && !accessoryUrls.includes(u))
   const confirmedLoad = await loadReferences(confirmed)
   if (confirmed.length > 0 && confirmedLoad.loaded.length < confirmed.length) {
-    // The confirmed photo IS the product truth: never silently swap it for a kit photo.
+    // The confirmed photo IS the product truth: never silently swap it for another photo.
     throw new Error(`Could not load product reference images: ${describeReferenceFailures(confirmedLoad.failures)}. Re-import the photo into Advance storage (import_image) and try again.`)
   }
   const accessoryLoad = await loadReferences(accessoryUrls)
-  const kitLoad = await loadReferences(kitUrls)
-  const productData = [...confirmedLoad.loaded, ...accessoryLoad.loaded, ...kitLoad.loaded].map((r) => r.dataUrl)
-  const referenceWarnings = [...accessoryLoad.failures, ...kitLoad.failures]
+  const productData = [...confirmedLoad.loaded, ...accessoryLoad.loaded].map((r) => r.dataUrl)
+  const referenceWarnings = [...accessoryLoad.failures]
   const supportLoad = await loadReferences(supportUrls)
   referenceWarnings.push(...supportLoad.failures)
   const supportData = supportLoad.loaded.map((r) => r.dataUrl)
@@ -611,13 +624,12 @@ export async function runWebPostGrokImage(options: WebPostGrokImageOptions): Pro
   const kindOf = (dataUrl: string): WebPostGrokImageResult['referencesUsed'][number] => {
     if (confirmedLoad.loaded.some((r) => r.dataUrl === dataUrl)) return 'product'
     if (accessoryLoad.loaded.some((r) => r.dataUrl === dataUrl)) return 'accessory'
-    if (kitLoad.loaded.some((r) => r.dataUrl === dataUrl)) return 'kit'
     if (dataUrl === logoDataUrl) return 'logo'
     return 'scene'
   }
   const referencesUsed = referenceUrls.map(kindOf)
   const accessoriesInRequest = referencesUsed.filter((k) => k === 'accessory').length
-  const lockBlock = lockRulesBlock(language, options, { strict: options.mcp?.strict === true, accessoriesAttached: accessoriesInRequest > 0 })
+  const lockBlock = lockRulesBlock(language, options, { strict: options.mcp?.strict === true, accessoriesAttached: accessoriesInRequest > 0, packProduct: options.mcp?.packProduct === true })
   const rawCopy = (options.copy || '').trim()
   const userCopy = rawCopy && !isShellMetaImagePrompt(rawCopy) ? rawCopy : ''
   const mcpRules: WebPostMcpRules | undefined = options.mcp
@@ -641,9 +653,10 @@ export async function runWebPostGrokImage(options: WebPostGrokImageOptions): Pro
       hasBrandLogo: Boolean(logoDataUrl),
       ctaStrength: options.ctaStrength,
       productRow: row,
-      ...(mcpRules ? { mcp: mcpRules } : {}),
+      ...(mcpRules ? { mcp: mcpRules, lockBlock } : {}),
     }),
-    lockBlock,
+    // Legacy (no MCP rules): the lock block stays at the end, as before.
+    mcpRules ? '' : lockBlock,
   ].filter(Boolean).join('\n\n')
   let sourcePrompt = assemble(options.businessContext ?? null, options.brandVisual)
   if (mcpRules) {
@@ -692,7 +705,7 @@ export async function runWebPostGrokImage(options: WebPostGrokImageOptions): Pro
     lockApplied: api.mode === 'product_lock_scene',
     referenceCount: referenceUrls.length,
     retriedWithClamp: retried,
-    productReferenceDataUrls: [...confirmedLoad.loaded, ...kitLoad.loaded].map((r) => r.dataUrl),
+    productReferenceDataUrls: confirmedLoad.loaded.map((r) => r.dataUrl),
     referencesUsed,
     referenceWarnings,
     request: buildRequest(prepared.prompt),

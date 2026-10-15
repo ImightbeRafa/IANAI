@@ -87,21 +87,6 @@ export function inferAssetRole(a: { tags?: unknown; isPrimary?: unknown; is_prim
   return roleFromLabel(a.label)
 }
 
-/** Round 12: the accessory a request text names FIRST (productNotes / scene) → its role; undefined when none. */
-export function roleFromRequestText(texts: Array<string | null | undefined>): ProductPhotoRole | undefined {
-  for (const t of texts) {
-    const s = String(t ?? '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
-    if (!s) continue
-    const hits: Array<[number, ProductPhotoRole]> = []
-    const box = s.search(/\b(caja|box|empaque|packaging)\b/)
-    const part = s.search(/\b(control|controller|controlador|mando|gamepad|joystick|transmisor|cable|cargador|helice|propeller)\b/)
-    if (box >= 0) hits.push([box, 'box'])
-    if (part >= 0) hits.push([part, 'part'])
-    if (hits.length) return hits.sort((a, b) => a[0] - b[0])[0][1]
-  }
-  return undefined
-}
-
 /** Photos of an offer with roles. `productPhotos` wins; else productImageUrls (first = hero, rest = detail). */
 export function resolveProductPhotos(offer: Pick<OfferInput, 'productPhotos' | 'productImageUrls'>): ProductPhoto[] {
   const tagged = (offer.productPhotos ?? []).filter((p) => p && typeof p.url === 'string' && p.url)

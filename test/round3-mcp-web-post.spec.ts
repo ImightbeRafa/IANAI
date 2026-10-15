@@ -110,8 +110,8 @@ describe('round 3 — dead asset URLs', () => {
     const r = await fetchPublicImageDetailed('https://html.test/x')
     expect(r).toMatchObject({ failure: { reason: expect.stringContaining('not an image') } })
   })
-  it('a dead KIT/accessory photo is skipped and reported, not fatal', async () => {
-    const out = await runWebPostGrokImage({ ...base, productUrls: [ref(1)], kitReferenceUrls: ['https://dead.test/k.webp'], logoUrl: null })
+  it('a dead accessory photo is skipped and reported, not fatal', async () => {
+    const out = await runWebPostGrokImage({ ...base, productUrls: [ref(1)], accessoryUrls: ['https://dead.test/k.webp'], logoUrl: null })
     expect(out.referenceWarnings[0]).toMatchObject({ url: 'https://dead.test/k.webp', status: 404 })
   })
   it('rehostReferenceImages copies photos into Advance storage and keeps the original on failure', async () => {

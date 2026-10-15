@@ -3,7 +3,7 @@
  * `get_server_info` tool and the `serverVersion` field of every execute result expose the same data inside a tool
  * response (free, read-only, no side effects) so a client can tell which build answered.
  */
-export const MCP_VERSION = '0.25.0'
+export const MCP_VERSION = '0.26.0'
 
 export const MCP_SERVER_INFO = {
   name: 'advance-ai',
@@ -28,16 +28,12 @@ export const MCP_FEATURES = [
   'halo_warning',
   'server_version_in_results',
   'safe_zone_autofix',
-  'code_composited_logo_cta',
-  'code_composited_text_layout',
-  'scene_only_generation',
   'props_unlisted_object_check',
   'accessory_refs_budget_5',
   'caption_field',
   'fidelity_palette_fallback',
   'seam_blend_no_letterbox',
   'text_never_over_product_make_room',
-  'severity_factors_retry',
   'product_notes_input',
   'exact_uses_code_layout',
   'scale_in_never_with_composite',
@@ -56,32 +52,33 @@ export const MCP_FEATURES = [
   'lock_scoped_to_photo_role',
   'props_thin_cable_and_main_product_check',
   'logo_trim_aspect_solid_plate_wordmark_first',
-  'pack_text_ocr_tesseract',
-  'pack_default_exact',
   'raw_scene_saved',
   'continuation_no_mirror',
   'shrink_picture_before_text',
   'cta_clean_slot_only',
-  'pack_ocr_retry_then_exact',
   'wood_grain_not_prop',
-  'pack_generated_warning',
   'text_never_over_any_object',
   'cutout_mask_coverage_repair',
   'fidelity_vs_reference_photo',
   'clear_sheet_film_kept',
   'self_plated_logo_no_second_plate',
-  'low_fidelity_retry_then_exact',
-  'quote_resolved_product_fidelity',
   'cross_offer_asset_reuse',
   'pack_ocr_small_print_tiles',
   'mask_repair_connected_only_leftover_fail',
-  'exact_fallback_strict_props_original_scale',
   'cta_blocked_shrinks_picture_to_60',
-  'asset_role_inference_role_column',
   'cutout_meta_survives_cache',
   'film_without_backdrop_veil',
   'bundle_offer_line_kept',
   'framed_badge_logo_self_plated',
+  // 0.26.0 (docs/mcp-quality.md)
+  'model_designed_ad_default',
+  'composite_layers_opt_in',
+  'confirmed_refs_only_no_kit_union',
+  'pack_real_pixel_swap',
+  'auto_retry_max_one_opt_in',
+  'paid_calls_logged_per_call',
+  'stamp_logo_price_opt_in',
+  'fidelity_warning_only',
 ] as const
 
 declare const __ADVANCE_BUILD_COMMIT__: string | undefined

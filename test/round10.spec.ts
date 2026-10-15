@@ -3,9 +3,9 @@
  *  1. no mirror / flip in the canvas extension or the bottom continuation (B: ghost controller, SP: blurred mirrored side strips + ghost pouch print);
  *  2. no room → the picture shrinks before the text; text ≥ 85 % (B came out at 64 %);
  *  3. a CTA slot is clean only with objectShare 0, no overlap, no table edge (PH clipped the pouch at 0.052, SP sat on the table edge);
- *  4. one misspelled pack word = fail (retry → exact); < 4 reference words → quoted printed strings of the offer attributes; the "Ciarity" miss;
+ *  4. (0.26.0: pack OCR removed — packs get the model-designed ad + the real-pixel swap);
  *  5. wood grain is not a prop;
- *  6. a warning when productFidelity "generated" is passed for a pack.
+ *  6. (0.26.0: productFidelity is ignored for packs: productFidelityNote).
  * Fixtures (test/fixtures/round10): the round-9 raw scenes of B and SP (reframed 4:5, half size), a crop of PH's raw scene (the pouch, full size) and a crop
  * of the round-8 LIVE PH post (pouch). No model call anywhere.
  */
@@ -17,9 +17,8 @@ vi.setConfig({ testTimeout: 60_000 })
 import { prepareAndLayout, TEXT_MIN } from '../api/lib/mcp/compose-scene'
 import { continueEdge, extendCanvas, shiftSceneUp, EXTEND_LAST_RESORT } from '../api/lib/mcp/scene-prep'
 import { slotUnclean, splitCopyBlocks } from '../api/lib/mcp/layout-ad'
-import { attributePrintedWords, checkPackText, compareWords, ocrAvailable } from '../api/lib/mcp/pack-ocr'
 import { checkExtraObjects, isSurfaceTexture } from '../api/lib/mcp/extra-objects'
-import { packGeneratedWarning } from '../api/lib/mcp/execute-tools'
+import { packFidelityDeprecatedNote } from '../api/lib/mcp/execute-tools'
 import { MCP_VERSION } from '../api/lib/mcp/server-info'
 
 const F10 = (n: string) => readFileSync(new URL(`./fixtures/round10/${n}`, import.meta.url))
@@ -126,36 +125,6 @@ describe('3. a CTA slot must be clean (objectShare 0, no overlap, no table edge)
   }, 120_000)
 })
 
-describe('4. pack printing: one misspelling fails; attribute fallback; Ciarity', () => {
-  it('compareWords: ONE misspelled word is a fail (round 9 PH "Piok-Me-Up" was a warning)', () => {
-    const ref = ['energy', 'patches', 'pick-me-up', 'mental', 'clarity']
-    expect(compareWords(ref, ['energy', 'patches', 'piok-me-up', 'mental', 'clarity']).status).toBe('fail')
-    expect(compareWords(ref, ref).status).toBe('pass')
-  })
-  it('attributePrintedWords: only the QUOTED printed strings of the offer attributes', () => {
-    const attrs = ["Franja inferior azul grisácea con 3 iconos (cama, manos con hoja, brazo) y textos impresos", "Insignia redonda '30 patches' abajo a la derecha y 'Sleeping Patches CR' abajo al centro"]
-    expect(attributePrintedWords(attrs).sort()).toEqual(['patches', 'sleeping'])
-  })
-  it('< 4 words on the reference photo → the attribute strings join the reference (mock OCR): a misspelled "Sleepinq" fails', async () => {
-    let call = 0
-    const run = async (_bin: string, args: string[]) => (args[0] === '--version' ? 'tesseract 5' : (call++ === 0 ? 'Sleeping' : 'Sleepinq Patches CR'))
-    const r = await checkPackText({ reference: await sceneWithObjectAtBottom(), generated: await sceneWithObjectAtBottom(), run, attributes: ["Insignia 'Sleeping Patches CR'"] })
-    expect(r.status).toBe('fail')
-    expect(r.referenceSource).toBe('photo+attributes')
-  })
-  it('real OCR: round-9 PH raw scene "Piok-Me-Up" fails; the round-8 live post reads "Ciarity" (the round-9 miss came from the reconstruction)', async () => {
-    if (!(await ocrAvailable())) { console.warn('tesseract not installed: OCR test skipped'); return }
-    const ref = readFileSync(new URL('./fixtures/round9/ph-ref-crop.jpg', import.meta.url))
-    const r9 = await checkPackText({ reference: ref, generated: F10('ph-pack-r9.jpg') })
-    expect(r9.status).toBe('fail')
-    if (r9.status === 'fail') expect(r9.misspelled.map((m) => m.found).join(' ')).toMatch(/piok-me-up/)
-    const r8 = await checkPackText({ reference: ref, generated: F10('ph-pack-r8-post.jpg') })
-    expect(r8.status).toBe('fail')
-    // Round 11: the whole-image + tile reads may report another garbled word of the same post first ("pick-me-lip")
-    if (r8.status === 'fail') expect(r8.misspelled.map((m) => m.found).join(' ')).toMatch(/ciarity|pick-me-l/)
-  }, 90_000)
-})
-
 describe('5. wood grain is not a prop', () => {
   it('isSurfaceTexture: a warm, wide, sparse band touching a side is texture; a compact orange blob is not; a blue band is not', () => {
     expect(isSurfaceTexture(4, 0.051, { x0: 0, y0: 0.695, x1: 1, y1: 0.885 })).toBe(true)
@@ -180,13 +149,13 @@ describe('5. wood grain is not a prop', () => {
   })
 })
 
-describe('6. explicit "generated" on a pack', () => {
-  it('the warning names the risk and the fix', () => {
-    expect(packGeneratedWarning()).toMatch(/generated.*pack/)
-    expect(packGeneratedWarning()).toMatch(/exact/)
+describe('6. productFidelity on a pack (0.26.0)', () => {
+  it('the note says it is deprecated / ignored and names the swap', () => {
+    expect(packFidelityDeprecatedNote('exact')).toMatch(/deprecated and ignored/)
+    expect(packFidelityDeprecatedNote('generated')).toMatch(/swap/)
   })
 })
 
 describe('version', () => {
-  it('MCP 0.25.0', () => expect(MCP_VERSION).toBe('0.25.0'))
+  it('MCP 0.26.0', () => expect(MCP_VERSION).toBe('0.26.0'))
 })

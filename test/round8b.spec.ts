@@ -261,7 +261,7 @@ describe('1 + 4. flow with mock xAI: no scale-in, qa counts the compositor only,
     brandKit: { id: 'k1', name: 'Prototipo', primaryColor: '#15263E', secondaryColor: '#F1EDE5', accentColor: '#2EC4B6', logoUrl: durl(LOGO, 'image/png'), referenceImages: [], forbiddenPhrases: [] },
     brandKits: [], latestGuideIntake: null,
   }) as never
-  const base = (ref: Buffer, accessories?: Array<{ imageUrl: string; label: string }>) => ({ apiKey: 'k', offerId: 'o1', aspectRatio: '4:5', productUrls: [durl(ref)], ...(accessories ? { accessories } : {}), lock: { allowedProps: accessories ? ['control remoto'] : ['banca de madera de parque'], forbidExtraProps: true } as never })
+  const base = (ref: Buffer, accessories?: Array<{ imageUrl: string; label: string }>) => ({ apiKey: 'k', offerId: 'o1', aspectRatio: '4:5', productUrls: [durl(ref)], ...(accessories ? { accessories } : {}), lock: { allowedProps: accessories ? ['control remoto'] : ['banca de madera de parque'], forbidExtraProps: true } as never, compositeLayers: true })
 
   it('Content\'s exact call on scene A (compositeLayers + enforceSafeZones:true + a flat bottom strip): no scale-in, ctaButtons 1, no extra-CTA risk, safeZones ok, seams reported as handled', async () => {
     scenes = [F8b('simscene-A-flat-bottom.jpg')]
@@ -298,7 +298,7 @@ describe('1 + 4. flow with mock xAI: no scale-in, qa counts the compositor only,
     if (!out.qa.ctaBlocked) expect(cta.cta.box!.x / cta.width).toBeGreaterThanOrEqual(0.55) // right of the controller (its body ends ≈ 0.55 after the upward shift)
     else {
       expect(out.qa.status).toBe('fail')
-      expect(out.qa.warnings.join(' ')).toMatch(/CTA is never dropped/)
+      expect(out.qa.warnings.join(' ')).toMatch(/qa\.ctaBlocked/)
       expect(out.qa.severityFactors?.ctaBlocked).toBe(8)
     }
     expect(out.caption).toMatch(/Escribinos por DM/)
