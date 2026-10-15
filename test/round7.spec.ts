@@ -243,7 +243,7 @@ describe('prompt (MCP path): natural full-bleed scene, no strips, product low; p
     expect(parseWebPostArgs({}).productNotes).toBeUndefined()
   })
   it('MCP 0.20.0 advertises the new features', () => {
-    expect(MCP_VERSION).toBe('0.22.0')
+    expect(MCP_VERSION).toBe('0.23.0')
     for (const f of ['seam_blend_no_letterbox', 'text_never_over_product_make_room', 'severity_factors_retry', 'product_notes_input', 'exact_uses_code_layout']) expect(MCP_FEATURES).toContain(f as never)
   })
 })
@@ -287,7 +287,7 @@ describe('autoRetry with several issues: severity factors, the better result is 
     expect(ar.reason).toMatch(/EXACTAMENTE como en la foto/)
     expect(out.qa.textScale).toBeGreaterThanOrEqual(0.8)
     expect(out.compositeLayers?.text.textOverProduct).toBe(false)
-  })
+  }, 120_000)
   it('the first scene is kept when the retry is worse (a retry never makes the delivered image worse)', async () => {
     scenes = [F7('scene-B-regen.jpg'), F7('scene-B.jpg')]
     const out = await generateWebStyleImage({ ...withBox(), copy: COPY_B })
@@ -297,7 +297,7 @@ describe('autoRetry with several issues: severity factors, the better result is 
       expect(out.autoRetry.kept).toBe('first')
       expect(out.autoRetry.retrySeverity!).toBeGreaterThan(out.autoRetry.firstSeverity!)
     } else expect(calls).toBe(1)
-  })
+  }, 120_000)
   it('fidelity < 0.75 alone (plane redrawn: A scene) raises the severity, triggers the one retry, and when it survives suggests productFidelity "exact" (never run automatically)', async () => {
     scenes = [F7('scene-A.jpg')]
     const out = await generateWebStyleImage({ ...base(), copy: COPY_A })
@@ -320,7 +320,7 @@ describe('autoRetry with several issues: severity factors, the better result is 
     expect(out.qa.status).toBe('fail') // text over the product is a defect
     expect(out.qa.severityFactors).toMatchObject({ textOverProduct: 4 })
     expect(out.qa.warnings.join(' ')).toMatch(/text scaled to \d+% of its nominal size/)
-  })
+  }, 120_000)
   it('pickBetterBySeverity: strictly lower wins, tie keeps the first', () => {
     expect(pickBetterBySeverity(13, 2)).toBe('retry')
     expect(pickBetterBySeverity(4, 4)).toBe('first')

@@ -62,12 +62,18 @@ export async function edgeMap(raw: Buffer, W: number, H: number): Promise<(box: 
   const g = await sharp(raw, { raw: { width: W, height: H, channels: 3 } }).resize(w, h, { kernel: 'lanczos3' }).greyscale().raw().toBuffer()
   const busy = new Uint8Array(w * h)
   for (let y = 0; y < h - 1; y++) for (let x = 0; x < w - 1; x++) busy[y * w + x] = Math.abs(g[y * w + x] - g[y * w + x + 1]) + Math.abs(g[y * w + x] - g[(y + 1) * w + x]) > 36 ? 1 : 0
+  // Round 10: summed-area table — same counts as the per-pixel loop, O(1) per box (the layout queries it thousands of times per scene variant)
+  const sat = new Int32Array((w + 1) * (h + 1))
+  for (let y = 0; y < h; y++) {
+    let row = 0
+    for (let x = 0; x < w; x++) { row += busy[y * w + x]; sat[(y + 1) * (w + 1) + x + 1] = sat[y * (w + 1) + x + 1] + row }
+  }
   return (box) => {
     const x0 = Math.max(0, Math.floor((box.x / W) * w)), x1 = Math.min(w, Math.ceil(((box.x + box.w) / W) * w))
     const y0 = Math.max(0, Math.floor((box.y / H) * h)), y1 = Math.min(h, Math.ceil(((box.y + box.h) / H) * h))
-    let n = 0, t = 0
-    for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) { n += busy[y * w + x]; t++ }
-    return t ? n / t : 0
+    if (x1 <= x0 || y1 <= y0) return 0
+    const n = sat[y1 * (w + 1) + x1] - sat[y0 * (w + 1) + x1] - sat[y1 * (w + 1) + x0] + sat[y0 * (w + 1) + x0]
+    return n / ((x1 - x0) * (y1 - y0))
   }
 }
 

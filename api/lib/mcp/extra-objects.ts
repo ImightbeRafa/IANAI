@@ -20,6 +20,8 @@ export type ExtraObjectsFinding = {
   clusters: Array<{ hue: string; share: number; /** Where those pixels sit (fractions of the picture) — the layout keeps the CTA / text off it. */ box?: NormalizedProductBox }>
   /** Round 9: thin cable-like structures found by shape (scene-objects.findThinStructures). */
   cables?: Array<{ box: NormalizedProductBox; share: number }>
+  /** Round 10: warm surface texture (wood grain) ignored as the table, not a prop. */
+  ignoredTextures?: string[]
   /** Soft light regions ignored as lighting (a window's sun glow), not props. */
   ignoredGlows?: string[]
   note: string
@@ -86,6 +88,17 @@ async function hueShares(bytes: Buffer, minChroma: number, skip?: (x: number, y:
   return { shares: counts.map((c) => (total ? c / total : 0)), chroma: chromaSum.map((c, i) => (counts[i] ? c / counts[i] : 0)), total, edgy: edgyCount.map((c, i) => (counts[i] ? c / counts[i] : 0)), boxes }
 }
 
+/** Hue bins (15° each) of the warm wood / tan family: red-orange (3) … yellow (7). */
+const WARM_BINS = new Set([2, 3, 4, 5, 6, 7])
+/** Round 10: a warm cluster spread over a wide band touching a side (≥ 60 % of the width) with a low fill of its own box (< 45 %) = surface texture. */
+export function isSurfaceTexture(bin: number, share: number, box: NormalizedProductBox): boolean {
+  const bw = box.x1 - box.x0, bh = box.y1 - box.y0
+  if (!WARM_BINS.has(bin) || bw < 0.6 || !(box.x0 < 0.05 || box.x1 > 0.95) || bh > 0.45) return false
+  // the scan covers 76 % of the height (header / footer skipped): density of the cluster in its own box
+  const density = share / Math.max(1e-6, (bw * bh) / 0.76)
+  return density < 0.45
+}
+
 export async function checkExtraObjects(input: {
   generated: Buffer
   /** Reference photos (product, accessories, kit, logo) as bytes. */
@@ -123,6 +136,7 @@ export async function checkExtraObjects(input: {
   const whole = await hueShares(input.generated, floor, (_x, y, _w, h) => y / h < 0.12 || y / h > 0.88)
   const clusters: ExtraObjectsFinding['clusters'] = []
   const glows: string[] = []
+  const textures: string[] = []
   // A hue FAMILY (the bin and its neighbours, any lightness) that covers > 10 % of the picture — in the scanned area or in the whole picture — is a surface
   // (wall / table / floor). Its highlights and shadows (other lightness classes) are shading, not objects; only a colour clearly MORE saturated than the
   // surface of its family (a bright blue cable on a navy wall: ~1.5x) can still be an object.
@@ -148,6 +162,19 @@ export async function checkExtraObjects(input: {
     const edgeSet = Boolean(bb && (bb.y0 + bb.y1) / 2 <= 0.45 && (bb.x1 - bb.x0) * (bb.y1 - bb.y0) <= 0.12 && (bb.x0 < 0.03 || bb.x1 > 0.97))
     const edgeLight = Boolean(bb && idx % LCLASS === 2 && (bb.y0 + bb.y1) / 2 <= 0.42 && (bb.x0 < 0.03 || bb.x1 > 0.97)) || edgeSet
     if ((idx % LCLASS === 2 && edgy[idx] < 0.12) || edgeLight) { glows.push(`${HUE_NAMES[bin]} (${Math.round(share * 1000) / 10}%)`); continue }
+    // Round 10: wood grain / warm surface texture, not a prop (round 9 B: the darker grain of a light wooden table read as an "orange" object). A WARM hue
+    // (red-orange … yellow) whose pixels are scattered over a wide horizontal band that runs to a side of the frame is the table's texture; a prop is compact.
+    // judged on the hue family (bin ± 1, every lightness class): the grain's darker / lighter streaks are one texture
+    let famShare = 0
+    let famBox: NormalizedProductBox | null = null
+    for (const d of [-1, 0, 1]) for (let lc = 0; lc < LCLASS; lc++) {
+      const k = key(bin + d, lc)
+      const b2 = boxes[k]
+      if (!b2 || !shares[k]) continue
+      famShare += shares[k]
+      famBox = famBox ? { x0: Math.min(famBox.x0, b2.x0), y0: Math.min(famBox.y0, b2.y0), x1: Math.max(famBox.x1, b2.x1), y1: Math.max(famBox.y1, b2.y1) } : { ...b2 }
+    }
+    if (famBox && isSurfaceTexture(bin, famShare, famBox)) { textures.push(`${HUE_NAMES[bin]} (${Math.round(share * 1000) / 10}%)`); continue }
     clusters.push({ hue: HUE_NAMES[bin], share: Math.round(share * 1000) / 10, ...(boxes[idx] ? { box: boxes[idx]! } : {}) })
   }
   // merge neighbouring bins that name the same colour (and lightness classes of the same hue)
@@ -166,6 +193,7 @@ export async function checkExtraObjects(input: {
     budget,
     clusters: merged,
     ...(glows.length ? { ignoredGlows: glows } : {}),
+    ...(textures.length ? { ignoredTextures: textures } : {}),
     note: suspected
       ? `colour(s) ${merged.map((c) => `${c.hue} (${c.share}%)`).join(', ')} appear next to the product but in no reference photo, logo or brand palette: a prop may have been invented (heuristic; grey/white objects are not detected)`
       : 'no unexplained colours next to the product (heuristic)',

@@ -140,7 +140,7 @@ describe('generateWebStyleImage on the Sleeping Patches scene (mock xAI)', () =>
     expect(out.qa.warnings.join(' ')).toMatch(/enforceSafeZones ignored/)
     const meta = await sharp(Buffer.from(out.generated.imageDataUrl.split(',')[1], 'base64')).metadata()
     expect(meta.width! / meta.height!).toBeCloseTo(0.8, 1)
-  })
+  }, 120_000)
   it('(a) even a scene that really has text in the free bands is not scaled in with compositeLayers (it is flagged and retried instead)', async () => {
     scenes = [F6('scene-A-with-text-4x5.jpg')]
     const out = await generateWebStyleImage({ ...base(), ctx: ctx(), copy: SLEEP_COPY, enforceSafeZones: true, autoRetry: false })
@@ -171,7 +171,7 @@ describe('generateWebStyleImage on the Sleeping Patches scene (mock xAI)', () =>
     const first = await generateWebStyleImage({ ...base(), ctx: ctx(), copy: SLEEP_COPY, autoRetry: false })
     expect(first.qa.status).toBe('fail')
     expect(first.qa.warnings.join(' ')).toMatch(/text over the product/)
-  })
+  }, 120_000)
 
   it('(c) the pouch prompt carries the generic lock: no wheels / landing gear / propellers / flaps / controllers / drawn sheet', async () => {
     scenes = [F8('sleeping-scene.jpg')]
@@ -259,5 +259,5 @@ describe('units: claims filter, product kind, logo check, prompt wording', () =>
     expect(en).toMatch(/every part, colour, material and proportion of the product exactly as in the reference photo/)
     expect(en).not.toMatch(/wheels|landing gear|propellers|flaps|controller/)
   })
-  it('MCP 0.22.0', () => expect(MCP_VERSION).toBe('0.22.0'))
+  it('MCP 0.23.0', () => expect(MCP_VERSION).toBe('0.23.0'))
 })

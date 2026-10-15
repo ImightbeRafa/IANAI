@@ -25,6 +25,14 @@ export type AdBlocks = { headline?: string; price?: string; facts?: string[]; ct
 /** Split the capped copy into the blocks the layout knows: headline, ONE price line, facts lines, the CTA (exact text). */
 /** Round 8: share of the pixels under the pill that differ strongly from the band background above which the pill would sit ON an object (an unlocated controller, a cable): wood grain / foliage stay under ~0.05, a dark controller on a light table is ~0.9. */
 export const OBJECT_UNDER_PILL = 0.12
+/** Round 10: objectShare is reported to 3 decimals; anything ≥ 0.001 (one sampled pixel in a thousand far from the band's background) is "something under the pill". */
+export const OBJECT_SHARE_EPS = 0.0005
+/** Round 10: a CTA slot is accepted only when it covers nothing (no located overlap beyond the air margin, objectShare 0) and straddles no table edge / seam. */
+export function slotUnclean(overlap: number, objectShare: number, seam: boolean): boolean {
+  // overlap is measured against the located box grown by a 0.8 % air margin: a sliver of that margin (≤ 1 % of the pill) is air, not product
+  return overlap > OVERLAP_EPS || objectShare > OBJECT_SHARE_EPS || seam
+}
+export const OVERLAP_EPS = 0.01
 
 export function splitCopyBlocks(copy: string, ctaText?: string): AdBlocks {
   const lines = copy.split(/\r?\n/).map((l) => l.replace(/\s+/g, ' ').trim()).filter(Boolean)
@@ -123,7 +131,8 @@ const dist = (a: Box, b: Box) => {
 
 type Fit = { role: 'headline' | 'price' | 'facts'; text: string; size: number; lineH: number; lines: string[]; w: number; h: number; fits: boolean; weight: number; family: string }
 
-export async function layoutAdLayers(input: LayoutInput): Promise<{ bytes: Buffer; report: AdLayoutReport }> {
+export async function layoutAdLayers(input: LayoutInput & { /** Round 10: geometry only (no text rasterising, no final composite; bytes = the input) — used to test many scene variants cheaply. */ probe?: boolean }): Promise<{ bytes: Buffer; report: AdLayoutReport }> {
+  const probe = input.probe === true
   const base = sharp(input.bytes).rotate().removeAlpha()
   const meta = await base.metadata()
   const W = meta.width || 0
@@ -303,7 +312,7 @@ export async function layoutAdLayers(input: LayoutInput): Promise<{ bytes: Buffe
       const sbox: Box = { x: 0, y: Math.max(0, stack.y - pad), w: W, h: Math.min(H, stack.h + pad * 2) }
       const sigma = Math.round(H * 0.016)
       const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}"><defs><filter id="b" x="-20%" y="-60%" width="140%" height="220%"><feGaussianBlur stdDeviation="${sigma}"/></filter></defs><rect x="${-W * 0.1}" y="${sbox.y}" width="${W * 1.2}" height="${sbox.h}" fill="${toHex(tone)}" fill-opacity="${alpha.toFixed(3)}" filter="url(#b)"/></svg>`
-      layers.push({ input: rasterize(svg), left: 0, top: 0 })
+      if (!probe) layers.push({ input: rasterize(svg), left: 0, top: 0 })
       scrim = { tone: toHex(tone), alpha: Math.round(alpha * 100) / 100, box: sbox }
     }
     const priceColor = best(lo, hi, [palette[2], palette[0], palette[1]].filter((c): c is Rgb => Boolean(c))) ?? headColor!
@@ -313,6 +322,7 @@ export async function layoutAdLayers(input: LayoutInput): Promise<{ bytes: Buffe
       const color = fit.role === 'price' ? priceColor : fit.role === 'headline' ? headColor! : tail
       const pad = Math.ceil(fit.size * 0.12)
       const tw = box.w + pad * 2
+      if (!probe) {
       const svg = await satori({
         type: 'div',
         props: {
@@ -321,6 +331,7 @@ export async function layoutAdLayers(input: LayoutInput): Promise<{ bytes: Buffe
         },
       } as unknown as Parameters<typeof satori>[0], { width: tw, height: box.h, fonts: satoriFonts([fit.family]) })
       layers.push({ input: rasterize(svg), left: box.x - pad, top: box.y })
+      }
       const contrast = Math.round(worstContrast(luminance(color), lo, hi) * 100) / 100
       elements.push({ id: fit.role, role: fit.role, box: box, text: fit.text, lines: fit.lines, fontSize: fit.size, color: toHex(color), contrast, fits: fit.fits })
     }
@@ -350,7 +361,7 @@ export async function layoutAdLayers(input: LayoutInput): Promise<{ bytes: Buffe
     }
     const zoneTop = Math.round(H * (1 - m.bottom - 0.22))
     const scrimSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}"><defs><linearGradient id="s" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${toHex(dark)}" stop-opacity="0"/><stop offset="0.45" stop-color="${toHex(dark)}" stop-opacity="${maxAlpha * 0.8}"/><stop offset="1" stop-color="${toHex(dark)}" stop-opacity="${maxAlpha}"/></linearGradient></defs><rect x="0" y="${zoneTop}" width="${W}" height="${H - zoneTop}" fill="url(#s)"/></svg>`
-    layers.push({ input: rasterize(scrimSvg), left: 0, top: 0 })
+    if (!probe) layers.push({ input: rasterize(scrimSvg), left: 0, top: 0 })
     report.scrim = { color: toHex(dark), maxAlpha }
     const scrimMean = blend(dark, maxAlpha, around.mean)
     // Round 8: the pill is rendered at 100 %, 86 % and 74 % of its height: when every slot of the full-size pill covers the located product / an accessory (the controller
@@ -384,7 +395,16 @@ export async function layoutAdLayers(input: LayoutInput): Promise<{ bytes: Buffe
       for (let y = by - Math.round(bh * 0.4); y <= by + bh * 1.4; y += 2) {
         let hits = 0, tot = 0
         for (let xx = x; xx < x + bw; xx += 6) { tot++; if (Math.abs(lumaAt(xx, y + stepY) - lumaAt(xx, y)) > 16) hits++ }
-        if (tot && hits / tot > 0.55) return true
+        if (tot && hits / tot > 0.55) {
+          // Round 10: a TABLE EDGE / band seam separates two different backgrounds; a thin plank gap / grain line has the same surface on both sides (not a seam)
+          const span = Math.max(3, Math.round(bh * 0.35))
+          let a = 0, b = 0, na = 0, nb = 0
+          for (let xx = x; xx < x + bw; xx += 8) {
+            for (let yy = y - span; yy < y; yy += 2) { a += lumaAt(xx, yy); na++ }
+            for (let yy = y + stepY + 1; yy <= y + stepY + span; yy += 2) { b += lumaAt(xx, yy); nb++ }
+          }
+          if (na && nb && Math.abs(a / na - b / nb) > 14) return true
+        }
       }
       return false
     }
@@ -406,9 +426,14 @@ export async function layoutAdLayers(input: LayoutInput): Promise<{ bytes: Buffe
           const dev = deviation(raw, W, H, win, bandBg)
           const seam = seamUnder(x, by, bw, bh)
           const ov = overlapOf(x, by, bw, bh)
-          // Round 8: a slot that covers the located product / an accessory (the controller) is not a candidate at all (> 2 % of the pill): +100 keeps it as the last resort
-          const score = b + 2 * dev + 3 * ov + (ov > 0.02 || dev > OBJECT_UNDER_PILL ? 100 : 0) + (seam ? 1.5 : 0) + (row === ctaTop ? 0 : 0.01) + 0.02 * pc.step
-          if (score < sel.score - 0.004) sel = { slot, x, by, busyness: b, score, seam, overlap: ov, dev, pc }
+          // Round 10: a slot is CLEAN only with nothing of the product / an object under the pill (overlap 0, objectShare 0) and no hard table edge / seam under
+          // it (round 9: PH's pill clipped the pouch corner at objectShare 0.05, SP's sat on the table edge). Any other slot is a last resort (+100) and is flagged
+          // blocked, so the caller moves / shrinks the picture (prepareAndLayout) or autoRetry regenerates.
+          // objectShare = object pixels under the pill ITSELF (the 1 % air margin of the busyness window may touch the product's edge without the pill clipping it)
+          const devCore = dev > 0 ? deviation(raw, W, H, { x, y: by, w: bw, h: bh }, bandBg) : 0
+          const unclean = slotUnclean(ov, devCore, seam)
+          const score = b + 2 * devCore + 0.5 * dev + 3 * ov + (unclean ? 100 : 0) + (seam ? 1.5 : 0) + (row === ctaTop ? 0 : 0.01) + 0.02 * pc.step
+          if (score < sel.score - 0.004) sel = { slot, x, by, busyness: b, score, seam, overlap: ov, dev: devCore, pc }
         }
       }
     }
@@ -422,7 +447,7 @@ export async function layoutAdLayers(input: LayoutInput): Promise<{ bytes: Buffe
       .blur(Math.max(2, btnHs * 0.1)).png().toBuffer()
     layers.push({ input: shadow, left: sel.x, top: by + Math.round(btnHs * 0.08) })
     layers.push({ input: pill.png, left: sel.x, top: by })
-    report.cta = { status: 'drawn', text: cta, box: ctaBox, fill: toHex(pill.fill), textColor: toHex(pill.ink), contrast: Math.round(contrastFromLuminance(luminance(pill.fill), luminance(pill.ink)) * 100) / 100, fontSize: pill.fontSize, fits: pill.fits, slot: sel.slot, busyness: Math.round(sel.busyness * 1000) / 1000, busy: sel.score > 0.08, objectShare: Math.round(sel.dev * 1000) / 1000, ...(sel.overlap > 0.02 || sel.dev > OBJECT_UNDER_PILL ? { blocked: true } : {}), ...(sel.seam ? { seam: true } : {}) }
+    report.cta = { status: 'drawn', text: cta, box: ctaBox, fill: toHex(pill.fill), textColor: toHex(pill.ink), contrast: Math.round(contrastFromLuminance(luminance(pill.fill), luminance(pill.ink)) * 100) / 100, fontSize: pill.fontSize, fits: pill.fits, slot: sel.slot, busyness: Math.round(sel.busyness * 1000) / 1000, busy: sel.score > 0.08, objectShare: Math.round(sel.dev * 1000) / 1000, ...(slotUnclean(sel.overlap, sel.dev, sel.seam) ? { blocked: true } : {}), ...(sel.seam ? { seam: true } : {}) }
     elements.push({ id: 'cta', role: 'cta', box: ctaBox, text: cta, fontSize: pill.fontSize, color: toHex(pill.ink), contrast: report.cta.contrast, fits: pill.fits })
   }
 
@@ -463,7 +488,7 @@ export async function layoutAdLayers(input: LayoutInput): Promise<{ bytes: Buffe
         const pick = brandOk ?? opts.sort((a, b) => b.k - a.k)[0]
         const padx = Math.round(lh * 0.22), pady = Math.round(lh * 0.16)
         const plateSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}"><rect x="${lx - padx}" y="${ly - pady}" width="${lw + 2 * padx}" height="${lh + 2 * pady}" rx="${Math.round(Math.min(lh, lw) * 0.22)}" fill="${toHex(pick.c)}"/></svg>`
-        layers.push({ input: rasterize(plateSvg), left: 0, top: 0 })
+        if (!probe) layers.push({ input: rasterize(plateSvg), left: 0, top: 0 })
         contrastFinal = Math.round(pick.k * 100) / 100
         plate = { fill: toHex(pick.c), contrast: contrastFinal }
       }
@@ -490,6 +515,7 @@ export async function layoutAdLayers(input: LayoutInput): Promise<{ bytes: Buffe
   report.layout.insideSafeZones = elements.every((e) => e.box.y >= top - 1 && e.box.y + e.box.h <= bot + 1 && e.box.x >= 0 && e.box.x + e.box.w <= W)
   if (report.layout.overlaps.length) report.text.fits = false
 
+  if (probe) return { bytes: input.bytes, report }
   const out = await sharp(input.bytes).rotate().removeAlpha().composite(layers).jpeg({ quality: 94, chromaSubsampling: '4:4:4' }).toBuffer()
   return { bytes: out, report }
 }

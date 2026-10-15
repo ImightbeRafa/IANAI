@@ -65,9 +65,10 @@ describe('1. the CTA is never dropped', () => {
     expect(out.scenePrep.roomBelow?.attempted).toBe(true)
     if (!out.scenePrep.roomBelow?.applied && !out.scenePrep.extended) expect(out.scenePrep.ctaBlocked).toBe(true)
   }, 60_000)
-  it('extendCanvas: same pixel size, the picture at ≥ 86 %, boxes mapped, the new border is textured (not a flat frame)', async () => {
+  it('extendCanvas: same pixel size, the picture never below the floor (round 10: 78 % last resort for a blocked CTA), boxes mapped, the new border is textured (not a flat frame)', async () => {
     const src = await textured(800, 1000, { x0: 0.3, y0: 0.5, x1: 0.7, y1: 0.98 })
-    const ext = await extendCanvas(src, 0.8, 0.25)
+    expect((await extendCanvas(src, 0.7, 0.25)).scale).toBe(0.78)
+    const ext = await extendCanvas(src, 0.86, 0.25)
     expect(ext.scale).toBe(0.86)
     const m = await sharp(ext.bytes).metadata()
     expect([m.width, m.height]).toEqual([800, 1000])
@@ -156,7 +157,8 @@ describe('5. pack fidelity: OCR of the printing + exact default for packs', () =
     const ref = ['energy', 'patches', 'pick-me-up', 'mental', 'clarity', 'caffeine']
     expect(compareWords(ref, ['energy', 'patches', 'pick-me-lip', 'mental', 'ciarity', 'caffeine']).status).toBe('fail')
     expect(compareWords(ref, ref).status).toBe('pass')
-    expect(compareWords(ref, ['energy', 'patches', 'pick-me-up', 'mental', 'ciarity', 'caffeine']).status).toBe('warning')
+    // round 10: one misspelled word is a fail too
+    expect(compareWords(ref, ['energy', 'patches', 'pick-me-up', 'mental', 'ciarity', 'caffeine']).status).toBe('fail')
   })
   it('tesseract on the real PatchHouse photo vs the round-8 redrawn pouch: fail with the misspelled words; the photo vs itself passes', async () => {
     if (!(await ocrAvailable())) { console.warn('tesseract not installed: OCR test skipped'); return }
@@ -216,5 +218,5 @@ describe('2 + 6. flow with mock xAI: scoped lock reaches the prompt, raw scene i
 })
 
 describe('version', () => {
-  it('MCP 0.22.0', () => expect(MCP_VERSION).toBe('0.22.0'))
+  it('MCP 0.23.0', () => expect(MCP_VERSION).toBe('0.23.0'))
 })

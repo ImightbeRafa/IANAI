@@ -6,7 +6,11 @@
  *   - exact: the same word is there;
  *   - misspelled: the closest generated word is 1..⅓·len edits away (Clarity → Ciarity);
  *   - missing: nothing close.
- * ≥ 2 misspelled words = fail (the redrawn printing is wrong: regenerate / use productFidelity "exact"); 1 = warning.
+ * Round 10: ANY misspelled word = fail (round 9 PH: one "Piok-Me-Up" was only a warning and the pack shipped misspelled): the generated flow regenerates once
+ * and then falls back to productFidelity "exact" (real pixels). When the reference photo has < 4 readable words (dark pouch, small print) the printed strings
+ * quoted in the offer's immutable attributes ('Sleeping Patches CR', '30 patches') join the reference words.
+ * Round 9 "Ciarity" miss: the round-9 local check ran on a RECONSTRUCTION (round-8 post, compressed + inpainted); on the real round-8 post the same settings read
+ * "Ciarity" (fixture test). Upscaling past ~2000 px smooths "Ci" into "Cl", so the 2000 px cap stays.
  */
 import { execFile } from 'node:child_process'
 import { mkdtemp, rm, writeFile } from 'node:fs/promises'
@@ -91,7 +95,8 @@ export function compareWords(reference: string[], generated: string[]): Omit<Ext
     else missing.push(w)
   }
   const score = ref.length ? Math.round((exact.length / ref.length) * 100) / 100 : 1
-  const status = misspelled.length >= 2 ? 'fail' : misspelled.length === 1 ? 'warning' : 'pass'
+  // Round 10: one misspelled word on a pack is already a defect (retry, then the real-pixel path)
+  const status = misspelled.length >= 1 ? 'fail' : 'pass'
   const reason = misspelled.length
     ? `the printing on the product was redrawn with ${misspelled.length} misspelled word(s): ${misspelled.map((m) => `"${m.found}" instead of "${m.expected}"`).join(', ')} (OCR, ${exact.length}/${ref.length} reference words exact)`
     : `the printed words of the reference read the same on the generated product (${exact.length}/${ref.length} exact${missing.length ? `, ${missing.length} not readable / hidden` : ''})`
@@ -102,7 +107,22 @@ export function compareWords(reference: string[], generated: string[]): Omit<Ext
 const refCache = new Map<string, string[]>()
 
 /** Reference photo vs generated scene. Needs ≥ 4 readable words on the reference (otherwise 'skipped': nothing to compare). */
-export async function checkPackText(input: { reference: Buffer; generated: Buffer; generatedBox?: { x0: number; y0: number; x1: number; y1: number } | null; run?: Runner }): Promise<PackTextCheck> {
+/** Round 10: printed strings quoted in the offer's immutable attributes ('Sleeping Patches CR', "30 patches", “…”), as OCR-comparable words (same filter as ocrWords). */
+export function attributePrintedWords(attributes: Array<string | null | undefined> | undefined): string[] {
+  const out: string[] = []
+  for (const a of attributes ?? []) {
+    if (!a) continue
+    for (const m of a.matchAll(/['"“”‘’«]([^'"“”‘’«»]{2,60})['"“”‘’»]/g)) {
+      for (const t of m[1].split(/\s+/)) {
+        const w = t.toLowerCase().replace(/^[^a-záéíóúñü0-9]+|[^a-záéíóúñü0-9]+$/g, '')
+        if ((w.match(/[a-záéíóúñü]/g)?.length ?? 0) >= 4 && (w.match(/[a-záéíóúñü-]/g)?.length ?? 0) / w.length >= 0.8) out.push(w)
+      }
+    }
+  }
+  return [...new Set(out)]
+}
+
+export async function checkPackText(input: { reference: Buffer; generated: Buffer; generatedBox?: { x0: number; y0: number; x1: number; y1: number } | null; run?: Runner; /** Round 10: offer immutable attributes (quoted printed strings are used when the reference photo has < 4 readable words). */ attributes?: Array<string | null | undefined> }): Promise<PackTextCheck & { referenceSource?: 'photo' | 'photo+attributes' }> {
   if (!(await ocrAvailable(input.run))) return { status: 'unavailable', engine: OCR_ENGINE, reason: 'tesseract OCR binary not installed: printed-text check not run' }
   try {
     const key = createHash('sha1').update(input.reference).digest('hex')
@@ -111,9 +131,17 @@ export async function checkPackText(input: { reference: Buffer; generated: Buffe
       ref = await ocrWords(input.reference, { run: input.run })
       if (!input.run) { refCache.set(key, ref); if (refCache.size > 32) refCache.delete(refCache.keys().next().value!) }
     }
-    if (new Set(ref).size < 4) return { status: 'skipped', engine: OCR_ENGINE, reason: 'fewer than 4 readable printed words on the reference photo', referenceWords: [...new Set(ref)] }
+    let source: 'photo' | 'photo+attributes' = 'photo'
+    if (new Set(ref).size < 4) {
+      const attr = attributePrintedWords(input.attributes)
+      const merged = [...new Set([...ref, ...attr])]
+      if (!attr.length || merged.length < 2) return { status: 'skipped', engine: OCR_ENGINE, reason: `fewer than 4 readable printed words on the reference photo${input.attributes?.length ? ' and no quoted printed text in the offer attributes' : ''}`, referenceWords: [...new Set(ref)] }
+      ref = merged
+      source = 'photo+attributes'
+    }
     const gen = await ocrWords(input.generated, { box: input.generatedBox ?? null, run: input.run })
-    return { engine: OCR_ENGINE, ...compareWords(ref, gen) }
+    const cmp = compareWords(ref, gen)
+    return { engine: OCR_ENGINE, ...cmp, ...(source !== 'photo' ? { referenceSource: source, reason: `${cmp.reason} (reference = photo words + the printed strings quoted in the offer attributes)` } : {}) }
   } catch (err) {
     return { status: 'unavailable', engine: OCR_ENGINE, reason: `OCR failed: ${err instanceof Error ? err.message.slice(0, 120) : 'error'}` }
   }

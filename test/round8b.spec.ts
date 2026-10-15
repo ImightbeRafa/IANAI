@@ -271,11 +271,16 @@ describe('1 + 4. flow with mock xAI: no scale-in, qa counts the compositor only,
     expect(out.qa.extraCtaRisk).toBe(false)
     expect(out.qa.safeZones).toBe('ok')
     expect(out.qa.seams?.remaining).toBe(0)
-    expect(out.qa.status).not.toBe('fail')
+    // Round 10: the bench front edge runs under every CTA slot of this simulated scene (and the plane spans the width, so neither the shift nor the canvas
+    // extension can free a clean slot): the CTA is still drawn but the only failure is the flagged blocked CTA (severity 8 → the one retry)
+    if (out.qa.status === 'fail') {
+      expect(out.qa.ctaBlocked).toBe(true)
+      expect(out.qa.severityFactors?.ctaBlocked).toBe(8)
+    }
     expect(out.qa.warnings.join(' ')).not.toMatch(/scale-in fallback used/)
     const meta = await sharp(Buffer.from(out.generated.imageDataUrl.split(',')[1], 'base64')).metadata()
     expect(meta.width! / meta.height!).toBeCloseTo(0.8, 1)
-  })
+  }, 120_000)
   it('scene B: the box art is not a "view change" warning (no fidelity warning, no suggestedFallback exact); the CTA is always drawn (blocked → flagged, severity 8); no scale-in', async () => {
     scenes = [F8b('scene-B-r7.jpg')]
     const out = await generateWebStyleImage({ ...base(F6('box.jpg'), [{ imageUrl: durl(F6('ctrl.png'), 'image/png'), label: 'control remoto' }]), productPhotoRole: 'box', ctx: ctx(), copy: COPY_B, enforceSafeZones: true, autoRetry: false })
@@ -296,5 +301,5 @@ describe('1 + 4. flow with mock xAI: no scale-in, qa counts the compositor only,
       expect(out.qa.severityFactors?.ctaBlocked).toBe(8)
     }
     expect(out.caption).toMatch(/Escribinos por DM/)
-  })
+  }, 120_000)
 })

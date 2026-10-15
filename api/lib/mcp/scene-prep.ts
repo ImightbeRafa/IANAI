@@ -4,8 +4,8 @@
  *  - `detectSeams`: the "keep the top / bottom bands empty" instruction made the model paint FLAT strips (navy / cream block at the top, the table cut
  *    flat at the bottom, a lighter rectangle under the top band). A seam = a flat uniform strip at the top / bottom edge of the picture that ends in a
  *    full-width step (gradient test across the boundary + flatness test of the strip). Natural horizons (wall / table) are not flat strips and are not flagged.
- *  - `blendSeams`: replaces the strip by a continuation of the scene (mirror of the rows next to the seam, blurred progressively with the distance,
- *    matched grain) so the band has no visible rectangle edge: no flat blocks, no frame.
+ *  - `blendSeams`: replaces the strip by a continuation of the scene (round 10: per-column background colour of the rows next to the seam + synthetic
+ *    grain matched to the texture; never a mirror / flip of the picture) so the band has no visible rectangle edge: no flat blocks, no frame.
  *  - `shiftSceneDown`: when the top of the picture is occupied by the product (no calm text corridor) the content is moved DOWN by extending the
  *    background above it the same way (content-aware blur-extend, no model call); the bottom rows that scroll out are cropped.
  */
@@ -133,79 +133,144 @@ function prng(seed: number) {
   }
 }
 
+/** Normalised box (fractions of the picture). */
+type NB = { x0: number; y0: number; x1: number; y1: number }
+
 /**
- * `n` rows that continue the picture ABOVE a seam, ordered outermost row first (row n-1 touches the seam).
+ * Round 10: per-edge continuation WITHOUT any mirror / flip (round 9's vertical high-pass read rows back INTO the picture, so a controller / pouch print near
+ * the edge came back as a ghost, and the rotated side strips read as a blurred frame).
  *
- * Source = the per-column MEAN of the `delta` rows right next to the seam (objects average out instead of being mirrored into the sky), blurred
- * horizontally, continued upward with the vertical colour drift measured on the next rows, plus a faint low-frequency modulation and grain matched to
- * the picture: a soft out-of-focus continuation of the wall / table, not a flat block and not a copy of an object.
+ * Builds `n` rows beyond a horizontal edge of `raw` (W×H RGB). `srcStart` = rows next to the edge that are skipped (the strip being replaced).
+ *   - colour: the per-column MEDIAN of the `delta` rows right next to the edge (thin objects drop out), with columns covered by a located product / object
+ *     (`maskCols`) re-interpolated from their free neighbours, blurred horizontally, carried outward with the measured vertical colour drift (damped);
+ *   - texture: NOT copied — synthetic streak noise (smooth along x, AR(1) across rows) whose strength matches the high-pass std of the source rows (wood grain,
+ *     fabric), plus fine grain. Nothing of the picture is reproduced except the per-column background colour.
+ * Returned rows are ordered by distance from the edge: fill row 0 touches the edge, row n-1 is the outermost. `edge` = the colour row used at distance 0.
  */
-function continuationAbove(raw: Buffer, W: number, H: number, srcStart: number, n: number, seed: number): { fill: Buffer; edge: Float32Array } {
+export function continueEdge(raw: Buffer, W: number, H: number, side: 'top' | 'bottom', srcStart: number, n: number, seed: number, maskCols?: Uint8Array): { fill: Buffer; edge: Float32Array } {
   const delta = Math.max(6, Math.round(H * 0.02))
-  const meanRows = (y0: number, y1: number): Float32Array => {
+  const rowAt = (j: number) => { const y = side === 'top' ? srcStart + j : H - 1 - srcStart - j; return Math.min(H - 1, Math.max(0, y)) }
+  const medianRows = (j0: number, j1: number): Float32Array => {
     const out = new Float32Array(W * 3)
-    const cnt = Math.max(1, Math.min(H, y1) - Math.max(0, y0))
-    for (let y = Math.max(0, y0); y < Math.min(H, y1); y++) for (let i = 0; i < W * 3; i++) out[i] += raw[y * W * 3 + i]
-    for (let i = 0; i < out.length; i++) out[i] /= cnt
+    const vals: number[] = []
+    for (let x = 0; x < W; x++) for (let c = 0; c < 3; c++) {
+      vals.length = 0
+      for (let j = j0; j < j1; j++) vals.push(raw[(rowAt(j) * W + x) * 3 + c])
+      vals.sort((a, b) => a - b)
+      out[x * 3 + c] = vals[vals.length >> 1]
+    }
     return out
   }
-  const base = meanRows(srcStart, srcStart + delta)
-  const next = meanRows(srcStart + delta, srcStart + 2 * delta)
-  // horizontal gaussian blur of the base row
+  const base = medianRows(0, delta)
+  const next = medianRows(delta, 2 * delta)
+  if (maskCols && maskCols.some((m) => m) && !maskCols.every((m) => m)) for (const arr of [base, next]) interpolateMasked(arr, W, maskCols)
   const sigma = Math.max(3, W * 0.02)
-  const rad = Math.ceil(sigma * 2.5)
-  const kern = Array.from({ length: rad * 2 + 1 }, (_, i) => Math.exp(-((i - rad) ** 2) / (2 * sigma * sigma)))
-  const ks = kern.reduce((a, b) => a + b, 0)
-  const row = new Float32Array(W * 3)
-  for (let x = 0; x < W; x++) for (let c = 0; c < 3; c++) {
-    let acc = 0
-    for (let j = -rad; j <= rad; j++) { const xx = Math.min(W - 1, Math.max(0, x + j)); acc += base[xx * 3 + c] * kern[j + rad] }
-    row[x * 3 + c] = acc / ks
-  }
-  // global vertical drift (per channel) per `delta` rows, pointing AWAY from the picture: continue it, damped
-  const drift = [0, 1, 2].map((c) => {
-    let a = 0, b = 0
-    for (let x = 0; x < W; x++) { a += base[x * 3 + c]; b += next[x * 3 + c] }
-    return (a - b) / W
-  })
-  const rnd = prng(seed)
-  // low-frequency modulation: a coarse random grid, bilinear
-  const gw = 9, gh = Math.max(2, Math.ceil(n / (H * 0.08)) + 1)
-  const grid = Array.from({ length: gw * gh }, () => (rnd() - 0.5) * 3)
-  const fill = Buffer.alloc(W * n * 3)
-  // Round 8: surface texture (wood grain, fabric) is carried over as a VERTICAL high-pass of the rows next to the seam (mirrored, damped, clamped):
-  // the soft continuation alone left a smooth tan band under a wooden table. Large shapes (objects) are low-frequency vertically and do not come along.
-  const TEX = 6
-  const lumaAt = (yy: number, x: number) => {
-    const j = (Math.min(H - 1, Math.max(0, yy)) * W + x) * 3
-    return 0.299 * raw[j] + 0.587 * raw[j + 1] + 0.114 * raw[j + 2]
-  }
-  const texAt = (k: number, x: number) => {
-    const yy = srcStart + k
+  const row = blurRow(base, W, sigma)
+  const drift = [0, 1, 2].map((c) => { let a = 0, b = 0; for (let x = 0; x < W; x++) { a += base[x * 3 + c]; b += next[x * 3 + c] } return (a - b) / W })
+  // texture strength of the source rows: luma minus a ±6-row vertical mean (horizontal grain / streaks), robust std, clamped
+  const lumaAt = (y: number, x: number) => { const j = (y * W + x) * 3; return 0.299 * raw[j] + 0.587 * raw[j + 1] + 0.114 * raw[j + 2] }
+  const hp: number[] = []
+  for (let j = 0; j < delta; j += 2) for (let x = 0; x < W; x += 3) {
+    if (maskCols?.[x]) continue
     let m = 0
-    for (let j = -TEX; j <= TEX; j++) m += lumaAt(yy + j, x)
-    m /= 2 * TEX + 1
-    const d = lumaAt(yy, x) - m
-    return d < -16 ? -16 : d > 16 ? 16 : d
+    for (let t = -6; t <= 6; t++) m += lumaAt(rowAt(j + t + 6), x)
+    hp.push(Math.abs(lumaAt(rowAt(j + 6), x) - m / 13))
   }
-  for (let y = 0; y < n; y++) {
-    const k = n - 1 - y // rows away from the seam
-    const dr = Math.min(1, k / delta)
+  hp.sort((a, b) => a - b)
+  const texStd = Math.min(9, (hp[Math.floor(hp.length * 0.5)] ?? 0) * 1.4826)
+  const rnd = prng(seed)
+  const corr = Math.max(4, Math.round(W * 0.012))
+  const streak = new Float32Array(W)
+  const fresh = new Float32Array(W)
+  const freshRow = () => {
+    for (let x = 0; x < W; x++) fresh[x] = rnd() - 0.5
+    const sm = blurScalar(fresh, W, corr)
+    let s = 0
+    for (let x = 0; x < W; x++) s += sm[x] * sm[x]
+    const k = 1 / Math.max(1e-6, Math.sqrt(s / W))
+    for (let x = 0; x < W; x++) sm[x] *= k
+    return sm
+  }
+  const init = freshRow()
+  streak.set(init)
+  const rho = 0.7
+  const fill = Buffer.alloc(W * n * 3)
+  for (let k = 0; k < n; k++) {
+    const nw = freshRow()
+    for (let x = 0; x < W; x++) streak[x] = rho * streak[x] + Math.sqrt(1 - rho * rho) * nw[x]
+    const fade = Math.max(0.35, 1 - k / Math.max(1, n * 1.6))
     for (let x = 0; x < W; x++) {
-      const gx = (x / Math.max(1, W - 1)) * (gw - 1), gy = (k / Math.max(1, n - 1)) * (gh - 1)
-      const x0 = Math.floor(gx), y0 = Math.floor(gy), fx = gx - x0, fy = gy - y0
-      const g = (grid[y0 * gw + x0] * (1 - fx) + grid[y0 * gw + Math.min(gw - 1, x0 + 1)] * fx) * (1 - fy) + (grid[Math.min(gh - 1, y0 + 1) * gw + x0] * (1 - fx) + grid[Math.min(gh - 1, y0 + 1) * gw + Math.min(gw - 1, x0 + 1)] * fx) * fy
-      const i = (y * W + x) * 3
-      const grain = (rnd() - 0.5) * 3.4
-      const tex = 0.8 * texAt(k, x)
+      const i = (k * W + x) * 3
+      const t = streak[x] * texStd * fade + (rnd() - 0.5) * 3.4
       for (let c = 0; c < 3; c++) {
         const shift = Math.max(-14, Math.min(14, drift[c] * (k / delta) * 0.55))
-        const v = row[x * 3 + c] + shift + g * Math.min(1, dr + 0.2) + grain + tex
+        const v = row[x * 3 + c] + shift + t
         fill[i + c] = v < 0 ? 0 : v > 255 ? 255 : Math.round(v)
       }
     }
   }
   return { fill, edge: row }
+}
+
+function blurScalar(src: Float32Array, W: number, sigma: number): Float32Array {
+  const rad = Math.ceil(sigma * 2.5)
+  const kern = Array.from({ length: rad * 2 + 1 }, (_, i) => Math.exp(-((i - rad) ** 2) / (2 * sigma * sigma)))
+  const ks = kern.reduce((a, b) => a + b, 0)
+  const out = new Float32Array(W)
+  for (let x = 0; x < W; x++) { let acc = 0; for (let j = -rad; j <= rad; j++) acc += src[Math.min(W - 1, Math.max(0, x + j))] * kern[j + rad]; out[x] = acc / ks }
+  return out
+}
+
+function blurRow(base: Float32Array, W: number, sigma: number): Float32Array {
+  const out = new Float32Array(W * 3)
+  const ch = new Float32Array(W)
+  for (let c = 0; c < 3; c++) {
+    for (let x = 0; x < W; x++) ch[x] = base[x * 3 + c]
+    const b = blurScalar(ch, W, sigma)
+    for (let x = 0; x < W; x++) out[x * 3 + c] = b[x]
+  }
+  return out
+}
+
+/** Replace masked entries of an interleaved RGB row by a linear interpolation between the nearest free entries (or the nearest free one at the ends). */
+export function interpolateMasked(arr: Float32Array, W: number, mask: Uint8Array) {
+  let x = 0
+  while (x < W) {
+    if (!mask[x]) { x++; continue }
+    const a = x - 1
+    let b = x
+    while (b < W && mask[b]) b++
+    for (let k = x; k < b; k++) for (let c = 0; c < 3; c++) {
+      const va = a >= 0 ? arr[a * 3 + c] : arr[b * 3 + c]
+      const vb = b < W ? arr[b * 3 + c] : va
+      const t = a >= 0 && b < W ? (k - a) / (b - a) : 0
+      arr[k * 3 + c] = va * (1 - t) + vb * t
+    }
+    x = b
+  }
+}
+
+/** Columns covered by a located box that reaches within `reach` (fraction of H) of the given edge. */
+export function edgeMask(boxes: NB[] | undefined, W: number, side: 'top' | 'bottom', reach = 0.08): Uint8Array | undefined {
+  if (!boxes?.length) return undefined
+  const m = new Uint8Array(W)
+  let any = false
+  for (const b of boxes) {
+    const touches = side === 'top' ? b.y0 <= reach : b.y1 >= 1 - reach
+    if (!touches) continue
+    const x0 = Math.max(0, Math.floor((b.x0 - 0.01) * W)), x1 = Math.min(W, Math.ceil((b.x1 + 0.01) * W))
+    for (let x = x0; x < x1; x++) m[x] = 1
+    any = true
+  }
+  return any ? m : undefined
+}
+
+/** Place a continueEdge result: top = fill rows reversed (outermost first) into rows [0, n); bottom = fill rows in order into rows [start, start+n). */
+function placeFill(out: Buffer, W: number, fill: Buffer, n: number, side: 'top' | 'bottom', start: number) {
+  for (let k = 0; k < n; k++) {
+    const y = side === 'top' ? start + n - 1 - k : start + k
+    fill.copy(out, y * W * 3, k * W * 3, (k + 1) * W * 3)
+  }
 }
 
 /** Cross-fade the `xf` original rows that follow the filled area into the continuation edge so there is no step between texture and fill. */
@@ -237,7 +302,7 @@ export function neighbourDetail(raw: Buffer, W: number, H: number, seam: Seam): 
 export type BlendReport = { applied: boolean; seams: Seam[]; remaining: Seam[]; /** Strips left as they were because the content next to them is detailed (flag qa.seamBlendSkipped). */ skipped: Array<{ edge: Seam['edge']; detail: number }>; note: string }
 
 /** Replace the flat strips by a continuation of the scene. Returns the new image (same pixel size) and the report. */
-export async function blendSeams(bytes: Buffer, seams: Seam[], quality = 93, refuseAbove = DETAIL_REFUSE): Promise<{ bytes: Buffer; report: BlendReport }> {
+export async function blendSeams(bytes: Buffer, seams: Seam[], quality = 93, refuseAbove = DETAIL_REFUSE, avoid?: NB[]): Promise<{ bytes: Buffer; report: BlendReport }> {
   if (!seams.length) return { bytes, report: { applied: false, seams: [], remaining: [], skipped: [], note: 'no seams' } }
   const base = sharp(bytes).rotate().removeAlpha()
   const { data, info } = await base.raw().toBuffer({ resolveWithObject: true })
@@ -252,18 +317,16 @@ export async function blendSeams(bytes: Buffer, seams: Seam[], quality = 93, ref
     if (s.edge === 'top') {
       const n = s.stripPx + feather
       if (n < 4 || n + 3 * Math.max(6, Math.round(H * 0.02)) + xf >= H) continue
-      const { fill, edge } = continuationAbove(data, W, H, n, n, 7)
-      fill.copy(out, 0, 0, W * n * 3)
+      const { fill, edge } = continueEdge(data, W, H, 'top', n, n, 7, edgeMask(avoid, W, 'top', s.stripShare + 0.08))
+      placeFill(out, W, fill, n, 'top', 0)
       softenJoin(out, data, W, n, xf, edge, 1)
     } else {
       const n = s.stripPx + feather
       const start = H - n // first row replaced
       if (n < 4 || n + 3 * Math.max(6, Math.round(H * 0.02)) + xf >= H) continue
-      // mirror the picture so the bottom becomes a top seam, build the continuation there, flip back
-      const flipped = await sharp(data, { raw: { width: W, height: H, channels: 3 } }).flip().raw().toBuffer()
-      const { fill, edge } = continuationAbove(flipped, W, H, n, n, 11)
-      const back = await sharp(fill, { raw: { width: W, height: n, channels: 3 } }).flip().raw().toBuffer()
-      back.copy(out, start * W * 3, 0, W * n * 3)
+      // Round 10: built directly below the scene (no flip / mirror of the picture)
+      const { fill, edge } = continueEdge(data, W, H, 'bottom', n, n, 11, edgeMask(avoid, W, 'bottom', s.stripShare + 0.08))
+      placeFill(out, W, fill, n, 'bottom', start)
       softenJoin(out, data, W, start - 1, xf, edge, -1)
     }
   }
@@ -281,8 +344,6 @@ export async function blendSeams(bytes: Buffer, seams: Seam[], quality = 93, ref
 export const MAX_CROP_ZOOM = 1.16
 
 export type CropZoomReport = { applied: boolean; zoom?: number; cropTopPx?: number; cropBottomPx?: number; cropLeftPx?: number; cropWidthPx?: number; note: string }
-type NB = { x0: number; y0: number; x1: number; y1: number }
-
 /**
  * Round 8: the flat strips are never "continued" when they can simply be CUT OFF. The picture keeps the rows between the strips and is zoomed back to the
  * original pixel size (same ratio, so a few % of the sides go too): no mirrored blur, no synthetic rows, nothing to see. Feasible when the zoom stays
@@ -327,17 +388,16 @@ export async function cropZoomSeams(bytes: Buffer, seams: Seam[], keep: NB[] = [
  * Move the picture content UP by `dPx` rows: the vacated bottom is a texture-carrying continuation of the bottom rows, the top `dPx` rows scroll out (cropped).
  * Used when the CTA has no free slot under the product (the mirror image of shiftSceneDown).
  */
-export async function shiftSceneUp(bytes: Buffer, dPx: number, quality = 93): Promise<Buffer> {
+export async function shiftSceneUp(bytes: Buffer, dPx: number, quality = 93, avoid?: NB[]): Promise<Buffer> {
   const { data, info } = await sharp(bytes).rotate().removeAlpha().raw().toBuffer({ resolveWithObject: true })
   const W = info.width, H = info.height
   const d = Math.max(0, Math.min(Math.round(H * MAX_SHIFT), Math.round(dPx)))
   if (d < 2) return bytes
-  const flipped = await sharp(data, { raw: { width: W, height: H, channels: 3 } }).flip().raw().toBuffer()
-  const { fill, edge } = continuationAbove(flipped, W, H, 0, d, 17)
+  // Round 10: continuation built below the bottom rows directly (no flip): background colour + matched synthetic texture, product columns masked
+  const { fill, edge } = continueEdge(data, W, H, 'bottom', 0, d, 17, edgeMask(avoid, W, 'bottom'))
   const out = Buffer.alloc(data.length)
   data.copy(out, 0, W * d * 3, W * H * 3)
-  const back = await sharp(fill, { raw: { width: W, height: d, channels: 3 } }).flip().raw().toBuffer()
-  back.copy(out, W * (H - d) * 3, 0, W * d * 3)
+  placeFill(out, W, fill, d, 'bottom', H - d)
   softenJoin(out, Buffer.from(out), W, H - d - 1, Math.max(4, Math.round(H * 0.012)), edge, -1)
   return sharp(out, { raw: { width: W, height: H, channels: 3 } }).jpeg({ quality }).toBuffer()
 }
@@ -349,15 +409,15 @@ export const MAX_SHIFT = 0.2
  * Move the picture content DOWN by `dPx` rows: the vacated top is a content-aware blur-extension of the top rows, the bottom `dPx` rows scroll out
  * (cropped). Same pixel size. Only sensible when the top of the scene is plain background.
  */
-export async function shiftSceneDown(bytes: Buffer, dPx: number, quality = 93): Promise<Buffer> {
+export async function shiftSceneDown(bytes: Buffer, dPx: number, quality = 93, avoid?: NB[]): Promise<Buffer> {
   const base = sharp(bytes).rotate().removeAlpha()
   const { data, info } = await base.raw().toBuffer({ resolveWithObject: true })
   const W = info.width, H = info.height
   const d = Math.max(0, Math.min(Math.round(H * MAX_SHIFT), Math.round(dPx)))
   if (d < 2) return bytes
   const out = Buffer.alloc(data.length)
-  const { fill, edge } = continuationAbove(data, W, H, 0, d, 13)
-  fill.copy(out, 0, 0, W * d * 3)
+  const { fill, edge } = continueEdge(data, W, H, 'top', 0, d, 13, edgeMask(avoid, W, 'top'))
+  placeFill(out, W, fill, d, 'top', 0)
   data.copy(out, W * d * 3, 0, W * (H - d) * 3)
   softenJoin(out, Buffer.from(out), W, d, Math.max(4, Math.round(H * 0.012)), edge, 1)
   return sharp(out, { raw: { width: W, height: H, channels: 3 } }).jpeg({ quality }).toBuffer()
@@ -369,48 +429,127 @@ export function bandZones(ratio: string) {
   return { top: m.top, bottom: m.bottom }
 }
 
-/** Round 9: extend a raw RGB picture by `top` / `bottom` rows with the texture-carrying continuation used by the shifts (bottom = the flipped top case). */
-async function extendRows(data: Buffer, W: number, H: number, top: number, bottom: number, seed: number): Promise<{ data: Buffer; H: number }> {
-  const H2 = H + top + bottom
-  const out = Buffer.alloc(W * H2 * 3)
-  data.copy(out, W * top * 3)
-  if (top > 0) {
-    const { fill, edge } = continuationAbove(data, W, H, 0, top, seed)
-    fill.copy(out, 0, 0, W * top * 3)
-    softenJoin(out, Buffer.from(out), W, top, Math.max(4, Math.round(H * 0.012)), edge, 1)
+/**
+ * Round 10: continue a picture sideways by `n` columns (no rotation, no mirror). Each new pixel takes the ROW's background colour — the median of the `delta`
+ * columns next to the edge at that row (rows covered by a located product re-interpolated), sharp near the picture and progressively smoothed vertically
+ * farther out — plus synthetic streak texture matched to the edge's grain. The table edge / wall line continues straight; nothing is copied.
+ * Returns n×H RGB, column 0 touching the picture.
+ */
+export function continueSide(raw: Buffer, W: number, H: number, side: 'left' | 'right', n: number, seed: number, maskRows?: Uint8Array): Buffer {
+  const delta = Math.max(4, Math.round(W * 0.015))
+  const colAt = (j: number) => Math.min(W - 1, Math.max(0, side === 'left' ? j : W - 1 - j))
+  const colour = new Float32Array(H * 3)
+  const vals: number[] = []
+  for (let y = 0; y < H; y++) for (let c = 0; c < 3; c++) {
+    vals.length = 0
+    for (let j = 0; j < delta; j++) vals.push(raw[(y * W + colAt(j)) * 3 + c])
+    vals.sort((a, b) => a - b)
+    colour[y * 3 + c] = vals[vals.length >> 1]
   }
-  if (bottom > 0) {
-    const flipped = await sharp(data, { raw: { width: W, height: H, channels: 3 } }).flip().raw().toBuffer()
-    const { fill, edge } = continuationAbove(flipped, W, H, 0, bottom, seed + 4)
-    const back = await sharp(fill, { raw: { width: W, height: bottom, channels: 3 } }).flip().raw().toBuffer()
-    back.copy(out, W * (top + H) * 3, 0, W * bottom * 3)
-    softenJoin(out, Buffer.from(out), W, top + H - 1, Math.max(4, Math.round(H * 0.012)), edge, -1)
+  if (maskRows && maskRows.some((m) => m) && !maskRows.every((m) => m)) interpolateMasked(colour, H, maskRows)
+  const near = blurRow(colour, H, Math.max(1, H * 0.002))
+  const far = blurRow(colour, H, Math.max(3, H * 0.02))
+  // grain strength next to the edge (luma minus a ±6-column horizontal mean)
+  const lumaAt = (y: number, x: number) => { const j = (y * W + x) * 3; return 0.299 * raw[j] + 0.587 * raw[j + 1] + 0.114 * raw[j + 2] }
+  const hp: number[] = []
+  for (let y = 0; y < H; y += 3) {
+    if (maskRows?.[y]) continue
+    let m = 0
+    for (let t = 0; t < 13; t++) m += lumaAt(y, colAt(t))
+    hp.push(Math.abs(lumaAt(y, colAt(6)) - m / 13))
   }
-  return { data: out, H: H2 }
+  hp.sort((a, b) => a - b)
+  const texStd = Math.min(9, (hp[Math.floor(hp.length * 0.5)] ?? 0) * 1.4826)
+  const rnd = prng(seed)
+  const corr = Math.max(4, Math.round(n * 0.25))
+  const out = Buffer.alloc(n * H * 3)
+  let prev = new Float32Array(n)
+  const rho = 0.6
+  for (let y = 0; y < H; y++) {
+    const f = new Float32Array(n)
+    for (let x = 0; x < n; x++) f[x] = rnd() - 0.5
+    const sm = blurScalar(f, n, corr)
+    let s = 0
+    for (let x = 0; x < n; x++) s += sm[x] * sm[x]
+    const k = 1 / Math.max(1e-6, Math.sqrt(s / Math.max(1, n)))
+    for (let x = 0; x < n; x++) prev[x] = y === 0 ? sm[x] * k : rho * prev[x] + Math.sqrt(1 - rho * rho) * sm[x] * k
+    for (let x = 0; x < n; x++) {
+      const a = Math.min(1, x / Math.max(1, n)) // 0 at the picture → 1 at the outer edge
+      const t = prev[x] * texStd * (1 - 0.5 * a) + (rnd() - 0.5) * 3.4
+      const i = (y * n + x) * 3
+      for (let c = 0; c < 3; c++) {
+        const v = near[y * 3 + c] * (1 - a) + far[y * 3 + c] * a + t
+        out[i + c] = v < 0 ? 0 : v > 255 ? 255 : Math.round(v)
+      }
+    }
+  }
+  return out
 }
 
-/** Smallest scale the canvas extension may use (the picture keeps ≥ 86 % of its size; never a visible frame: every side is a textured continuation). */
+/** Rows covered by a located box that reaches within `reach` (fraction of W) of the given side. */
+export function sideMask(boxes: NB[] | undefined, H: number, side: 'left' | 'right', reach = 0.06): Uint8Array | undefined {
+  if (!boxes?.length) return undefined
+  const m = new Uint8Array(H)
+  let any = false
+  for (const b of boxes) {
+    if (!(side === 'left' ? b.x0 <= reach : b.x1 >= 1 - reach)) continue
+    for (let y = Math.max(0, Math.floor((b.y0 - 0.01) * H)); y < Math.min(H, Math.ceil((b.y1 + 0.01) * H)); y++) m[y] = 1
+    any = true
+  }
+  return any ? m : undefined
+}
+
+/** Smallest scale the canvas extension normally uses (the picture keeps ≥ 86 % of its size). */
 export const MIN_EXTEND_SCALE = 0.86
+/** Round 10: last resort for a CTA blocked by a product standing on the bottom edge (never used to make room for text). */
+export const EXTEND_LAST_RESORT = 0.78
 
 /**
- * Round 9: "extend the canvas" — the picture is scaled to `scale` (≥ 0.86) and the canvas around it is continued from the scene on every side (no flat frame),
- * same pixel size. `anchorY` = share of the freed height that goes above the picture (0.3 = most of the new room is BELOW, for the CTA).
- * Returns the bytes and the mapping of a normalised box into the new picture.
+ * "Extend the canvas" — the picture is scaled to `scale` (≥ 0.86) and the canvas around it continued from the scene, same pixel size. `anchorY` = share of
+ * the freed height that goes above the picture. Round 10: no mirror / rotation: the sides take each row's background colour (row-average continuation), the
+ * top / bottom each column's (column-average), both with matched synthetic grain; columns / rows of `avoid` boxes touching an edge are masked so no product
+ * colour is carried out. Returns the bytes and the mapping of a normalised box into the new picture.
  */
-export async function extendCanvas(bytes: Buffer, scale: number, anchorY = 0.3, quality = 93): Promise<{ bytes: Buffer; map: (b: NB) => NB; scale: number }> {
+export async function extendCanvas(bytes: Buffer, scale: number, anchorY = 0.3, quality = 93, avoid?: NB[]): Promise<{ bytes: Buffer; map: (b: NB) => NB; scale: number }> {
   const meta = await sharp(bytes).metadata()
   const W = meta.width!, H = meta.height!
-  const s = Math.max(MIN_EXTEND_SCALE, Math.min(1, scale))
+  const s = Math.max(EXTEND_LAST_RESORT, Math.min(1, scale))
   const ws = Math.round(W * s), hs = Math.round(H * s)
   const small = await sharp(bytes).rotate().removeAlpha().resize(ws, hs, { kernel: 'lanczos3' }).raw().toBuffer()
   const top = Math.round((H - hs) * anchorY), bottom = H - hs - top
   const left = Math.floor((W - ws) / 2), right = W - ws - left
-  const v = await extendRows(small, ws, hs, top, bottom, 23)
-  // sides: rotate so the left / right edges become top / bottom, extend, rotate back
-  const rot = await sharp(v.data, { raw: { width: ws, height: v.H, channels: 3 } }).rotate(90).raw().toBuffer()
-  // after rotate(90) clockwise: new width = v.H, new height = ws; the top rows are the LEFT edge of the picture
-  const hx = await extendRows(rot, v.H, ws, left, right, 31)
-  const back = await sharp(hx.data, { raw: { width: v.H, height: hx.H, channels: 3 } }).rotate(-90).jpeg({ quality }).toBuffer()
+  // 1. sides on the scaled picture (rows hs)
+  const mid = Buffer.alloc(W * hs * 3)
+  const L = left > 0 ? continueSide(small, ws, hs, 'left', left, 31, sideMask(avoid, hs, 'left')) : null
+  const R = right > 0 ? continueSide(small, ws, hs, 'right', right, 37, sideMask(avoid, hs, 'right')) : null
+  for (let y = 0; y < hs; y++) {
+    small.copy(mid, (y * W + left) * 3, y * ws * 3, (y + 1) * ws * 3)
+    if (L) for (let x = 0; x < left; x++) { const si = (y * left + x) * 3, di = (y * W + (left - 1 - x)) * 3; mid[di] = L[si]; mid[di + 1] = L[si + 1]; mid[di + 2] = L[si + 2] }
+    if (R) for (let x = 0; x < right; x++) { const si = (y * right + x) * 3, di = (y * W + left + ws + x) * 3; mid[di] = R[si]; mid[di + 1] = R[si + 1]; mid[di + 2] = R[si + 2] }
+    // soft join: the outer picture columns fade into the continuation's first column (no vertical step at the picture edge)
+    const xfs = Math.max(3, Math.round(ws * 0.012))
+    for (let t = 0; t < xfs; t++) {
+      const a = (t + 1) / (xfs + 1)
+      if (L) { const si = (y * left) * 3, di = (y * W + left + t) * 3; for (let c = 0; c < 3; c++) mid[di + c] = Math.round(L[si + c] * (1 - a) + mid[di + c] * a) }
+      if (R) { const si = (y * right) * 3, di = (y * W + left + ws - 1 - t) * 3; for (let c = 0; c < 3; c++) mid[di + c] = Math.round(R[si + c] * (1 - a) + mid[di + c] * a) }
+    }
+  }
+  // 2. top / bottom over the full width (corners come from the side columns)
+  const midAvoid = avoid?.map((b) => ({ x0: (left + b.x0 * ws) / W, x1: (left + b.x1 * ws) / W, y0: b.y0, y1: b.y1 }))
+  const out = Buffer.alloc(W * H * 3)
+  mid.copy(out, W * top * 3)
+  const xf = Math.max(4, Math.round(H * 0.012))
+  if (top > 0) {
+    const { fill, edge } = continueEdge(mid, W, hs, 'top', 0, top, 23, edgeMask(midAvoid, W, 'top'))
+    placeFill(out, W, fill, top, 'top', 0)
+    softenJoin(out, Buffer.from(out), W, top, Math.min(xf, hs >> 3), edge, 1)
+  }
+  if (bottom > 0) {
+    const { fill, edge } = continueEdge(mid, W, hs, 'bottom', 0, bottom, 27, edgeMask(midAvoid, W, 'bottom'))
+    placeFill(out, W, fill, bottom, 'bottom', top + hs)
+    softenJoin(out, Buffer.from(out), W, top + hs - 1, Math.min(xf, hs >> 3), edge, -1)
+  }
+  const jpg = await sharp(out, { raw: { width: W, height: H, channels: 3 } }).jpeg({ quality }).toBuffer()
   const map = (b: NB): NB => ({ x0: (left + b.x0 * ws) / W, x1: (left + b.x1 * ws) / W, y0: (top + b.y0 * hs) / H, y1: (top + b.y1 * hs) / H })
-  return { bytes: back, map, scale: s }
+  return { bytes: jpg, map, scale: s }
 }

@@ -37,6 +37,16 @@ Enabled tools now:
 
 **Offers + photos (sync write, no credits, 0.11):** `create_offer`, `update_offer`, `set_primary_product_image`, `tag_product_image`, `create_upload_url` → PUT → `finalize_upload`.
 
+### 0.23.0 — no-mirror continuation, picture shrinks before the text, clean CTA slots only, pack OCR retry → exact, wood grain not a prop
+
+Registry / server version **0.23.0**. **No migration**, no new env/secret/binding/route/cron, no new npm dependency, no Dockerfile change. Proofs: `test/round10.spec.ts` (the REAL round-9 raw scenes of B / SP / PH, round-8 live PH crop), `test/web-mcp-parity.spec.ts` (web request unchanged).
+
+- **Continuation:** never a mirror / flip / rotation of the picture: top / bottom = per-column background colour + matched grain, sides = per-row background colour + matched grain; located product columns / rows are masked (no product colour carried out).
+- **Text ≥ 85 %:** when there is no room, the picture moves / shrinks first (canvas 94 / 90 / 86 %, `scenePrep.extended.reason` = `text` | `cta` | `cta+text`); 82 / 78 % only for a CTA blocked by a product on the bottom edge.
+- **CTA:** accepted only on a clean slot (`compositeLayers.cta.objectShare` 0, no overlap, no table edge); otherwise moved / shrunk, else drawn + `qa.ctaBlocked`.
+- **Packs:** one misspelled word = `qa.packText.status:"fail"` → one forced regeneration (`autoRetry.forcedBy:"packText"`) → `packFallback` to `productFidelity:"exact"`; < 4 words on the reference → quoted printed strings of the offer attributes (`referenceSource`). Explicit `"generated"` on a pack → `productFidelityWarning`.
+- **Props:** wood grain / warm surface texture → `propsPolicy.check.ignoredTextures`, not a prop.
+
 ### 0.22.0 — CTA never dropped, lock scoped to the photo role, cable / main-product props check, logo trim + solid plate + wordmark first, pack-print OCR + exact default for packs, raw scene saved
 
 Registry / server version **0.22.0**. **No migration**, no new env/secret/binding/route/cron, no new npm dependency. **Runtime image:** `tesseract-ocr` (+ `eng`, `spa`) via apt in the Dockerfile runtime stage. Proofs: `test/round9.spec.ts` (crops of the round-8 live posts + the real PatchHouse photo, mock xAI), `test/web-mcp-parity.spec.ts` (web request unchanged).
@@ -267,7 +277,7 @@ Authorize always redirects to the Supabase **Site URL** (`https://advanceai.stud
 
 ## Code map
 - Host: `api/mcp.ts`, `api/lib/mcp/protocol.ts`
-- Registry: `api/lib/mcp/tool-registry.ts` (0.22.0)
+- Registry: `api/lib/mcp/tool-registry.ts` (0.23.0)
 - Offers / photos / uploads: `api/lib/mcp/offer-tools.ts`, `api/lib/mcp/upload-tools.ts`, `api/lib/mcp/asset-rehost.ts`, `api/lib/adpack/offer-profile.ts`, `api/lib/brand-profile.ts`, `api/lib/placeholder-guard.ts`, `api/lib/product-image-order.ts`, migration `085`
 - Brand kits: `api/lib/mcp/brand-kit-tools.ts`, `api/lib/brand-kit-resolve.ts`, migration `081`
 - Audit: `api/lib/mcp/tool-audit.ts`; MCP caps: `api/lib/mcp/limits.ts`

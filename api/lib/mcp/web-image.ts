@@ -216,7 +216,7 @@ export type WebStyleImageOutput = {
   fidelityCheck: FidelityCheckResult
   fidelity_warning?: FidelityWarning
   qa: McpImageQa
-  autoRetry: { requested: boolean; attempted: boolean; reason?: string; kept?: 'first' | 'retry'; keptReason?: string; firstSeverity?: number; retrySeverity?: number; factors?: { first: Record<string, number>; retry: Record<string, number> }; firstQa?: { safeZones: McpImageQa['safeZones']; textPresent: McpImageQa['textPresent']; issues: string[] } }
+  autoRetry: { requested: boolean; attempted: boolean; /** Round 10: the retry ran although autoRetry was not requested, because the pack printing was misspelled. */ forcedBy?: 'packText'; reason?: string; kept?: 'first' | 'retry'; keptReason?: string; firstSeverity?: number; retrySeverity?: number; factors?: { first: Record<string, number>; retry: Record<string, number> }; firstQa?: { safeZones: McpImageQa['safeZones']; textPresent: McpImageQa['textPresent']; issues: string[] } }
   references: { used: WebPostGrokImageResult['referencesUsed']; warnings: WebPostGrokImageResult['referenceWarnings'] }
   /** What was allowed in the scene. Local pixel detection of invented props is not available: prevented at the prompt/reference level. */
   propsPolicy: { forbidExtraProps: boolean; allowed: string[]; accessoryReferences: number; verifiedLocally: boolean; source: 'input' | 'none'; check?: ExtraObjectsFinding; unlisted?: Array<{ label: string; inliers: number }> }
@@ -293,6 +293,9 @@ function retryHintComposite(qa: McpImageQa, language: 'es' | 'en', ratio: string
       ? (es ? 'reproducí el producto EXACTAMENTE como en la foto de referencia: misma forma de ala, mismas piezas (ni aletas ni solapas de más), mismos colores y materiales de cada pieza, misma cantidad de ruedas y hélices' : 'reproduce the product EXACTLY as in the reference photo: same wing shape, same parts (no extra fins or tabs), same colour and material of every part, same number of wheels and propellers')
       : (es ? 'reproducí el producto EXACTAMENTE como en la foto de referencia: misma forma, mismas piezas, mismos colores, materiales y proporciones, y lo impreso intacto (textos, logos, íconos)' : 'reproduce the product EXACTLY as in the reference photo: same shape, same parts, same colours, materials and proportions, and the print intact (text, logos, icons)'))
   }
+  // Round 10: no room for the text / the CTA → ask for a SMALLER product (round 9 B: the hint only said "lower" and the retry was worse)
+  if (f.textScale || f.ctaBlocked || f.ctaSeam) bits.push(es ? 'mostrá el producto MÁS PEQUEÑO: que ocupe como máximo el 45% del ancho y el 40% del alto, centrado, con fondo calmo alrededor (espacio para el texto arriba y el botón abajo)' : 'show the product SMALLER: at most 45% of the width and 40% of the height, centred, with calm background around it (room for the text above and the button below)')
+  if (f.packText) bits.push(es ? 'el texto impreso del empaque salió con errores de ortografía: copiá letra por letra lo impreso en la foto de referencia (o dejá el texto chico ilegible antes que inventarlo)' : 'the printing on the pack came out misspelled: copy the printed text letter by letter from the reference photo (keep small print soft rather than inventing it)')
   if (f.props) bits.push(kind === 'plane' ? (es ? 'sin objetos que no estén en las fotos de referencia ni en los extras permitidos (cables, cajas, controles, herramientas)' : 'no objects that are not in the reference photos or in the allowed extras (cables, boxes, controllers, tools)') : (es ? 'sin objetos que no estén en las fotos de referencia ni en los extras permitidos' : 'no objects that are not in the reference photos or the allowed extras'))
   if (qa.separatorLines.length) bits.push(es ? 'sin separadores sueltos al inicio o final de línea' : 'no dangling separators at the start or end of a line')
   return bits.join('; ')
@@ -501,7 +504,7 @@ export async function generateWebStyleImage(input: WebStyleImageInput): Promise<
         const refUrl = grok.productReferenceDataUrls.find((u) => u.startsWith('data:'))
         if (refUrl) {
           try {
-            packText = await checkPackText({ reference: decode(refUrl), generated: decode(preFixImageDataUrl), generatedBox: productBoxOf(fidelityCheck) ?? null })
+            packText = await checkPackText({ reference: decode(refUrl), generated: decode(preFixImageDataUrl), generatedBox: productBoxOf(fidelityCheck) ?? null, attributes: scopedLock.attrs })
           } catch { /* heuristic only */ }
         }
       }
@@ -714,9 +717,12 @@ export async function generateWebStyleImage(input: WebStyleImageInput): Promise<
   const firstGrok = await runWebPostGrokImage({ ...baseOptions, ...(withRules ? { mcp: mcpRules() } : {}) })
   let totalCost = firstGrok.estimatedCostUsd
   let kept: Attempt = await finishAttempt(firstGrok, await reframe(firstGrok.imageDataUrl, firstGrok.aspectRatio))
-  if (input.autoRetry === true && kept.decisionSeverity > 0) {
+  // Round 10: a misspelled pack print always gets the one corrective regeneration (then the caller falls back to productFidelity "exact")
+  const packForced = kept.packText?.status === 'fail' && input.autoRetry !== false
+  if ((input.autoRetry === true && kept.decisionSeverity > 0) || packForced) {
     // One corrective regeneration inside the same job: no second approval, no second charge (the caller charges once).
     autoRetry.attempted = true
+    if (input.autoRetry !== true) autoRetry.forcedBy = 'packText'
     autoRetry.reason = hint(kept.qa)
     autoRetry.firstQa = { safeZones: kept.qa.safeZones, textPresent: kept.qa.textPresent, issues: kept.qa.warnings.slice(0, 6) }
     try {

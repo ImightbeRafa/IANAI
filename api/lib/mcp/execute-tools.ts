@@ -26,6 +26,11 @@ import type { McpOfferStore } from './offer-tools.js'
 import { resolveImageRatio } from '../image-ratios.js'
 import { createModelGateway } from '../adpack/gateway.js'
 import { isPackProduct } from './product-kind.js'
+
+/** Round 10: warning returned when productFidelity "generated" is passed explicitly for a printed pack / pouch. */
+export function packGeneratedWarning(): string {
+  return 'productFidelity "generated" was passed for a printed pack / pouch: the model redraws the printing and often misspells it (round 9: "Piok-Me-Up", garbled small print). Omit productFidelity (defaults to "exact" for packs) or pass "exact"; a misspelling found by the OCR check triggers one regeneration and then the exact fallback (packFallback)'
+}
 import { parseImageFidelityArgs, photosFromUrls, resolveToolProductFidelity } from '../adpack/fidelity/pipeline.js'
 import { normalizeImageReferenceRole } from '../image-prompt-context.js'
 import { buildImageEditSystemPrompt, resolveGrokAspectRatio, runGrokImageEdit } from '../grok-image-edit.js'
@@ -893,13 +898,17 @@ async function runImageGenerateBody(options: {
   const heroRoleForKind = (() => { const sku = ownedRefs.find((i) => i.id === options.productImageId?.trim()); return sku ? (roleFromImageRow({ tags: sku.tags, is_primary: sku.isPrimary }) ?? roleFromLabel(sku.label)) : undefined })()
   const packDefault = isPackProduct([offerForKind?.name, offerForKind?.type, offerForKind?.productDescription, offerForKind?.technicalSpecs, options.productNotes]) && !(heroRoleForKind && ['box', 'contents', 'part'].includes(heroRoleForKind))
   const fidelityMode = resolveToolProductFidelity(options.productFidelity, productUrls.length > 0, { defaultExact: packDefault })
+  // Round 10: an explicit "generated" on a printed pack is honoured but warned about (Grok misspells pack printing; round 9 SP / PH)
+  const packOffer = isPackProduct([offerForKind?.name, offerForKind?.type, offerForKind?.productDescription, offerForKind?.technicalSpecs, options.productNotes])
+  const productFidelityWarning = options.productFidelity === 'generated' && packDefault ? packGeneratedWarning() : undefined
+  let packFallback: { from: 'generated'; to: 'exact'; reason: string; failed?: boolean; generatedQa?: unknown } | undefined
   const fidelityDefaultNote = !options.productFidelity && fidelityMode === 'exact' ? 'productFidelity defaulted to "exact" for a printed pack / pouch (real product pixels, the printing is never redrawn); pass productFidelity:"generated" to let the model redraw it' : undefined
   let fidelity: Record<string, unknown> | null = null
   let promptUsed = prompt
   let postCheck: Record<string, unknown> | null = null
   let rawSceneDataUrl: string | undefined
   let generated: { imageDataUrl: string; providerModel: string; estimatedCostUsd: number; resolution: string; quality: string; aspectRatio: string; mode: string; lockApplied: boolean }
-  if (fidelityMode === 'exact') {
+  const runExact = async () => {
     // Real product pixels on a generated plate (A1), then the SAME ad layers as the web-style flow: copy / one CTA / logo /
     // safe zones / QA / halo flags (api/lib/mcp/exact-flow.ts). Never a redrawn product; flags are warnings only.
     const offerName = options.ctxPreview.offers.find((o) => o.id === options.offerId)?.name || options.offerId
@@ -950,6 +959,9 @@ async function runImageGenerateBody(options: {
       ...(exactAd.providerRetries ? { providerRetries: exactAd.providerRetries } : {}),
       accessories: 'not composited in exact mode (real box / controller photos are only used by productFidelity "generated")',
     }
+  }
+  if (fidelityMode === 'exact') {
+    await runExact()
   } else {
     // Web path: same prompt/refs/logo/lock/clamp-retry as /api/generate-image (api/lib/web-post-image.ts).
     const offerRow = options.offerStore
@@ -1025,6 +1037,17 @@ async function runImageGenerateBody(options: {
     postCheck = postCheckSummary(web)
     if (web.lockScope) postCheck = { ...postCheck, lockScope: web.lockScope }
     rawSceneDataUrl = web.rawScene?.imageDataUrl
+    // Round 10: the pack printing is still misspelled after the one regeneration → fall back to the real-pixel path (the printing is never redrawn)
+    if (web.packText?.status === 'fail' && packOffer && exactProductUrls.length) {
+      const genReason = web.packText.reason
+      const genPostCheck = postCheck
+      try {
+        await runExact()
+        packFallback = { from: 'generated', to: 'exact', reason: `${genReason}${web.autoRetry.attempted ? ' after the automatic retry' : ''}: switched to productFidelity "exact" (real product pixels)`, generatedQa: (genPostCheck as { qa?: unknown } | null)?.qa ?? null }
+      } catch (err) {
+        packFallback = { from: 'generated', to: 'exact', failed: true, reason: `exact fallback failed: ${err instanceof Error ? err.message.slice(0, 120) : 'error'} — the generated image (misspelled print) is kept` }
+      }
+    }
   }
 
   const persistStarted = Date.now()
@@ -1119,8 +1142,10 @@ async function runImageGenerateBody(options: {
     grokMode: generated.mode,
     lockApplied: generated.lockApplied,
     estimatedCostUsd: generated.estimatedCostUsd,
-    productFidelity: fidelityMode,
+    productFidelity: packFallback && !packFallback.failed ? 'exact' : fidelityMode,
     ...(fidelityDefaultNote ? { productFidelityNote: fidelityDefaultNote } : {}),
+    ...(productFidelityWarning ? { productFidelityWarning } : {}),
+    ...(packFallback ? { packFallback } : {}),
     ...(fidelity ? { fidelity } : {}),
     ...(postCheck || {}),
     raw,
