@@ -24,8 +24,8 @@ export function isMissingColumnError(err: unknown, column?: string): boolean {
 /** Error with a stable code the MCP host surfaces as `error.code`. */
 export class MigrationPendingError extends Error {
   readonly code = 'MIGRATION_PENDING'
-  constructor(feature: string) {
-    super(`${feature} needs database migration ${MIGRATION_085}, which is not applied yet. Nothing was changed. Ask the Advance team to apply it, then retry.`)
+  constructor(feature: string, migration: string = MIGRATION_085) {
+    super(`${feature} needs database migration ${migration}, which is not applied yet. Nothing was changed. Ask the Advance team to apply it, then retry.`)
     this.name = 'MigrationPendingError'
   }
 }

@@ -95,7 +95,8 @@ function artifactStore(): McpArtifactStore {
       if (options.kind === 'generated') return []
       return [{
         id: 'img-product',
-        imageUrl: 'https://cdn.example/product.jpg',
+        // 0.26.0: the reference gate downloads the photo before quoting (an unreachable URL is a hard error) — inline image here
+        imageUrl: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
         offerId: 'o1',
         kind: 'product',
         label: 'Front',

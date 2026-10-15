@@ -31,6 +31,9 @@ import { freeBands } from './safe-zones.js'
 import type { ScenePrepReport } from './compose-scene.js'
 import { swapRealPackPixels, type PackSwapReport } from './pack-swap.js'
 import { fetchPublicImageDetailed } from '../fetch-image-data-url.js'
+import sharp from 'sharp'
+import { upscaleProductPhoto } from '../adpack/fidelity/upscale.js'
+import { REFERENCE_GATE_CONFIG } from './reference-gate.js'
 import type { McpBrandContext } from './user-tools.js'
 
 /** Round 7 thresholds (compositeLayers opt-in only). Text below 80 % of its nominal size is always warned; below 75 % (or on the product) it counts in the severity. */
@@ -188,6 +191,8 @@ export type WebStyleImageInput = {
   stampPrice?: boolean
   /** Test seam: segmentation gateway for the pack swap (default: the Gemini gateway, used only when the local flood fails). */
   segmentGateway?: Pick<ModelGateway, 'segment'>
+  /** Default true on the MCP path: product refs below REFERENCE_GATE_CONFIG.MIN_LONG_SIDE are upscaled for free (deterministic, never redrawn) before generation. */
+  upscaleLowRes?: boolean
 }
 
 /** One paid provider call made for this image (logged one row each by the caller). */
@@ -232,6 +237,8 @@ export type WebStyleImageOutput = {
   scenePrep?: ScenePrepReport
   /** Printed packs: the real pack pixels swapped into the located box (or why not). */
   packSwap?: PackSwapReport
+  /** Low-resolution product refs upscaled before generation (deterministic Lanczos + unsharp, free, verified not redrawn). */
+  upscaledRefs?: Array<{ from: string; to: string }>
   /** What code stamped on the model's ad on request (stampLogo / stampPrice / vector logo). */
   stamped?: { logo: boolean; price?: string; reason: string }
   copyNormalised: string[]
@@ -320,6 +327,29 @@ export function logoNeedsStamp(url: string | null | undefined): boolean {
   return Boolean(url && /^data:image\/svg|\.svg(?:[?#]|$)/i.test(url.trim()))
 }
 
+/** Product refs below MIN_LONG_SIDE → deterministic upscale (≤ 2×, Lanczos + edge-aware unsharp, verified by SSIM / silhouette). Free. */
+export async function upscaleLowResRefs(urls: string[]): Promise<{ urls: string[]; notes: Array<{ from: string; to: string }> }> {
+  const out: string[] = []
+  const notes: Array<{ from: string; to: string }> = []
+  for (const url of urls) {
+    try {
+      const got = await fetchPublicImageDetailed(url)
+      if (!('dataUrl' in got)) { out.push(url); continue }
+      const bytes = Buffer.from(got.dataUrl.slice(got.dataUrl.indexOf(',') + 1), 'base64')
+      const meta = await sharp(bytes).metadata()
+      if (Math.max(meta.width ?? 0, meta.height ?? 0) >= REFERENCE_GATE_CONFIG.MIN_LONG_SIDE) { out.push(url); continue }
+      const up = await upscaleProductPhoto(bytes, { force: true })
+      if (!up.upscaled) { out.push(url); continue }
+      const jpg = await sharp(up.bytes).flatten({ background: '#ffffff' }).jpeg({ quality: 93 }).toBuffer()
+      out.push(`data:image/jpeg;base64,${jpg.toString('base64')}`)
+      notes.push({ from: `${up.from.width}x${up.from.height}`, to: `${up.to.width}x${up.to.height}` })
+    } catch {
+      out.push(url)
+    }
+  }
+  return { urls: out, notes }
+}
+
 export async function generateWebStyleImage(input: WebStyleImageInput): Promise<WebStyleImageOutput> {
   const { ctx } = input
   const offerRaw = ctx.offers.find((o) => o.id === input.offerId)
@@ -393,6 +423,8 @@ export async function generateWebStyleImage(input: WebStyleImageInput): Promise<
   const droppedAccessories = accessoryCandidates.filter((a) => !accessories.includes(a))
   const packOffer = isPackProduct([offerRaw?.name, offerRaw?.type, offerRaw?.productDescription, offerRaw?.technicalSpecs, input.productNotes])
   const scopedLock = scopeLockToPhotoRole(input.lock?.immutableAttributes, { role: input.productPhotoRole, photoLabel: input.productPhotoLabel, attachedLabels: accessories.map((a) => a.label), packProduct: packOffer })
+  // 0.26.0: low-resolution refs are accepted (with a warning upstream) and upscaled for free before generation — never redrawn, never charged.
+  const upscaled = withRules && input.upscaleLowRes !== false ? await upscaleLowResRefs(input.productUrls) : { urls: input.productUrls, notes: [] as Array<{ from: string; to: string }> }
   const baseOptions = {
     apiKey: input.apiKey,
     aspectRatio: ratioPlan.generateAt,
@@ -411,7 +443,7 @@ export async function generateWebStyleImage(input: WebStyleImageInput): Promise<
     offerId: input.offerId,
     productRow: productRowFromOffer(offer),
     // Confirmed product photos only (0.26.0: the kit's reference images are never appended as product refs).
-    productUrls: input.productUrls,
+    productUrls: upscaled.urls,
     accessoryUrls: accessories.map((a) => a.imageUrl),
     supportUrls: input.supportUrls || [],
     // Default: the kit logo rides as a reference and the model places it. composite / stampLogo: code stamps the real asset, so the model gets none.
@@ -818,6 +850,7 @@ export async function generateWebStyleImage(input: WebStyleImageInput): Promise<
     ...(scenePrep ? { scenePrep } : {}),
     ...(packSwap ? { packSwap } : {}),
     ...(stamped ? { stamped } : {}),
+    ...(upscaled.notes.length ? { upscaledRefs: upscaled.notes } : {}),
     copyNormalised: tidied.changes,
     ...(removedClaims.length ? { removedClaims } : {}),
     copyOverflow: overflowFinal,
@@ -833,7 +866,7 @@ export async function generateWebStyleImage(input: WebStyleImageInput): Promise<
 }
 
 /** Compact, result-safe summary of the post-check (no image bytes). */
-export function postCheckSummary(out: Pick<WebStyleImageOutput, 'fidelityCheck' | 'fidelity_warning' | 'qa' | 'copySource' | 'referenceCount' | 'retriedWithClamp' | 'autoRetry' | 'references' | 'propsPolicy' | 'copyNormalised'> & Partial<Pick<WebStyleImageOutput, 'props_warning' | 'copyOverflow' | 'providerRetries' | 'safeZoneFix' | 'qaBeforeFix' | 'caption' | 'compositeLayers' | 'scenePrep' | 'packSwap' | 'stamped' | 'paidCalls'>>): Record<string, unknown> {
+export function postCheckSummary(out: Pick<WebStyleImageOutput, 'fidelityCheck' | 'fidelity_warning' | 'qa' | 'copySource' | 'referenceCount' | 'retriedWithClamp' | 'autoRetry' | 'references' | 'propsPolicy' | 'copyNormalised'> & Partial<Pick<WebStyleImageOutput, 'props_warning' | 'copyOverflow' | 'providerRetries' | 'safeZoneFix' | 'qaBeforeFix' | 'caption' | 'compositeLayers' | 'scenePrep' | 'packSwap' | 'stamped' | 'paidCalls' | 'upscaledRefs'>>): Record<string, unknown> {
   return {
     ...(out.fidelity_warning ? { fidelity_warning: out.fidelity_warning } : {}),
     fidelityCheck: out.fidelityCheck.status === 'skipped'
@@ -858,6 +891,7 @@ export function postCheckSummary(out: Pick<WebStyleImageOutput, 'fidelityCheck' 
     ...(out.packSwap ? { packSwap: out.packSwap } : {}),
     ...(out.stamped ? { stamped: out.stamped } : {}),
     ...(out.paidCalls ? { paidCalls: out.paidCalls } : {}),
+    ...(out.upscaledRefs?.length ? { upscaledRefs: out.upscaledRefs } : {}),
     ...(out.qaBeforeFix ? { qaBeforeFix: out.qaBeforeFix } : {}),
     ...(out.caption ? { caption: out.caption } : {}),
   }

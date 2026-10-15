@@ -1,5 +1,5 @@
 import { supabase } from '../lib/supabase'
-import { compressBrandImage } from '../utils/imageCompression'
+import { BRAND_LOGO_MAX_DIM, BRAND_REFERENCE_MAX_DIM, compressBrandImage } from '../utils/imageCompression'
 
 export const CANONICAL_IMAGE_BUCKET = 'post-images'
 
@@ -52,7 +52,11 @@ export async function uploadBrandKitAsset(
   if (file.size > 10 * 1024 * 1024) {
     throw new Error('Image too large (max 10MB)')
   }
-  const compressed = await compressBrandImage(file, kind === 'logo' ? 512 : 1024, kind === 'logo' ? 0.85 : 0.8)
+  // MCP 0.26.0: reference images keep their full resolution (up to 4096 px, high quality) so they can pass the ≥ 1600 px
+  // reference rule (docs/mcp-quality.md); logos stay small.
+  const compressed = kind === 'logo'
+    ? await compressBrandImage(file, BRAND_LOGO_MAX_DIM, 0.85)
+    : await compressBrandImage(file, BRAND_REFERENCE_MAX_DIM, 0.95)
   const path = `${session.user.id}/brand-kit/${kind === 'logo' ? 'logo' : 'ref'}-${Date.now()}.webp`
   const upload = () => supabase.storage.from(CANONICAL_IMAGE_BUCKET).upload(path, compressed, {
     contentType: 'image/webp',

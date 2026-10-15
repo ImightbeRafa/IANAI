@@ -354,6 +354,14 @@ async function rasterizeSvgFile(file: File, maxDim: number, quality: number): Pr
  * Compress a brand logo or visual reference for Storage + Gemini.
  * SVGs are rasterized to transparent WebP so image models can ingest them.
  */
+/** Brand-kit logo uploads: long side cap (px). */
+export const BRAND_LOGO_MAX_DIM = 512
+/**
+ * Brand-kit REFERENCE image uploads: long side cap (px). Was 1024, which made every reference fail the MCP ≥ 1600 px rule
+ * (docs/mcp-quality.md); now near-full resolution, never upscaled.
+ */
+export const BRAND_REFERENCE_MAX_DIM = 4096
+
 export async function compressBrandImage(
   file: File,
   maxDim: number = 512,

@@ -48,6 +48,7 @@ import {
 } from './execute-job.js'
 import { assertMcpBulkCount } from './limits.js'
 import { assertProductReferenceGate, parseReferenceMode } from './reference-gate.js'
+import { approvedRefUrlsForBulk, defaultGateDeps } from './preflight.js'
 import { resolveImageRatio } from '../image-ratios.js'
 import { parseImageFidelityArgs } from '../adpack/fidelity/pipeline.js'
 import { mcpGetBrandContext, type McpAuthUser, type McpDbClient } from './user-tools.js'
@@ -730,7 +731,8 @@ export async function mcpExecuteBulkPosts(options: {
   const aspectRatioFallback = args.aspectRatioFallback === true
   // Every supported ratio works (F3): 4:5 is generated at the nearest native ratio and reframed.
   resolveImageRatio(aspectRatio)
-  const confirmedRefUrls = await resolveConfirmedProductRefUrls({
+  // Fails before approval on foreign ids (tenant check).
+  await resolveConfirmedProductRefUrls({
     artifactStore: options.artifactStore,
     userId: options.user.id,
     brandId,
@@ -738,11 +740,13 @@ export async function mcpExecuteBulkPosts(options: {
     productImageId,
     referenceImageIds: confirmedRefIds,
   })
+  // 0.26.0: only APPROVED, gate-accepted refs (hero first); a missing essential refuses here, before the quote.
+  const approved = await approvedRefUrlsForBulk({ artifactStore: options.artifactStore, userId: options.user.id, brandId, offerId, ctx, confirmedIds: confirmedRefIds, productImageId, guidePrompt: typeof args.guidePrompt === 'string' ? args.guidePrompt : undefined, scene: typeof args.scene === 'string' ? args.scene : undefined, gate: defaultGateDeps({ user: options.user }) })
   const quote = quoteBulkPosts({
     count,
     imageModel,
     expandCount: referenceMode === 'none' ? 0 : countExpandNeeded(
-      confirmedRefUrls.length || existingRefs.length
+      approved.urls.length
     ),
   })
   const boundInput = {
@@ -762,7 +766,7 @@ export async function mcpExecuteBulkPosts(options: {
     referenceMode,
     referenceImageIds: confirmedRefIds,
     productImageId,
-    productRefUrls: confirmedRefUrls.length ? confirmedRefUrls : existingRefs,
+    productRefUrls: approved.urls,
   }
   const approvalRequestId = typeof args.approvalRequestId === 'string'
     ? args.approvalRequestId
@@ -1301,7 +1305,8 @@ export async function mcpExecuteCampaignPack(options: {
   const aspectRatioFallback = args.aspectRatioFallback === true
   // Every supported ratio works (F3): 4:5 is generated at the nearest native ratio and reframed.
   resolveImageRatio(aspectRatio)
-  const confirmedRefUrls = await resolveConfirmedProductRefUrls({
+  // Fails before approval on foreign ids (tenant check).
+  await resolveConfirmedProductRefUrls({
     artifactStore: options.artifactStore,
     userId: options.user.id,
     brandId,
@@ -1309,12 +1314,14 @@ export async function mcpExecuteCampaignPack(options: {
     productImageId,
     referenceImageIds: confirmedRefIds,
   })
+  // 0.26.0: only APPROVED, gate-accepted refs (hero first); a missing essential refuses here, before the quote.
+  const approved = await approvedRefUrlsForBulk({ artifactStore: options.artifactStore, userId: options.user.id, brandId, offerId, ctx, confirmedIds: confirmedRefIds, productImageId, guidePrompt: typeof args.guidePrompt === 'string' ? args.guidePrompt : undefined, scene: typeof args.scene === 'string' ? args.scene : undefined, gate: defaultGateDeps({ user: options.user }) })
   const quote = quoteCampaignPack({
     scriptCount: count,
     imageCount: count,
     imageModel,
     expandCount: referenceMode === 'none' ? 0 : countExpandNeeded(
-      confirmedRefUrls.length || existingRefs.length
+      approved.urls.length
     ),
   })
   const boundInput = {
@@ -1331,7 +1338,7 @@ export async function mcpExecuteCampaignPack(options: {
     referenceMode,
     referenceImageIds: confirmedRefIds,
     productImageId,
-    productRefUrls: confirmedRefUrls.length ? confirmedRefUrls : existingRefs,
+    productRefUrls: approved.urls,
   }
   const approvalRequestId = typeof args.approvalRequestId === 'string' ? args.approvalRequestId : ''
   const pending = await requireOrIssueApproval({ approvalStore: options.approvalStore, approvalRequestId, userId: options.user.id, toolName: 'execute_campaign_pack', input: boundInput, quotedCreditCost: quote.totalCredits, appOrigin: options.appOrigin, language: boundInput.language, items: count })

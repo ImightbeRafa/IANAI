@@ -41,6 +41,9 @@ import { quarantineBannedFacts } from '../adpack/compliance.js'
 import { mcpUpdateOffer, type McpOfferStore } from './offer-tools.js'
 import { mcpUpdateBrandKit, resolveMcpBrandKit, type McpBrandKitStore } from './brand-kit-tools.js'
 import type { RehostFn } from './asset-rehost.js'
+import type { McpArtifactStore } from './artifact-store.js'
+import { mcpGetBrandContext } from './user-tools.js'
+import { defaultGateDeps, preflightForOffer, preflightView, PreflightBlockedError } from './preflight.js'
 
 export { ADPACK_MCP_TOOLS, isAdPackMcpTool, type AdPackMcpToolName } from './adpack-tool-names.js'
 
@@ -476,6 +479,8 @@ export async function dispatchAdPackTool(options: {
   offerStore?: McpOfferStore | null
   brandKitStore?: McpBrandKitStore | null
   rehost?: RehostFn | null
+  /** 0.26.0: assets for the preflight (approved-only refs + score before the quote). */
+  artifactStore?: McpArtifactStore | null
 }): Promise<Record<string, unknown>> {
   const { name, args, user, service } = options
   const persist = () => persistCorrections({ args, user, db: options.db, offerStore: options.offerStore, brandKitStore: options.brandKitStore, rehost: options.rehost })
@@ -558,6 +563,15 @@ export async function dispatchAdPackTool(options: {
         }
         // B2: corrections are written once, on the first call (the approved retry repeats the same arguments).
         const saved = approvalRequestId ? undefined : await persist()
+        // 0.26.0: preflight BEFORE the quote (saved-brand path): approved assets, offer essentials, brief. Low photo quality never blocks.
+        if (usesSavedBrand(args) && options.db && options.artifactStore) {
+          const bctx = await mcpGetBrandContext(options.db, user, String(args.brandId))
+          const pfOfferId = typeof args.offerId === 'string' && args.offerId ? args.offerId : bctx.offers[0]?.id
+          if (pfOfferId) {
+            const pf = await preflightForOffer({ artifactStore: options.artifactStore, userId, brandId: String(args.brandId), offerId: pfOfferId, ctx: bctx, confirmedIds: Array.isArray(args.productImageIds) ? (args.productImageIds as unknown[]).filter((x): x is string => typeof x === 'string') : [], brief: typeof args.brief === 'string' ? args.brief : undefined, language: args.language === 'en' ? 'en' : 'es', gate: defaultGateDeps({ user, offerStore: options.offerStore }) })
+            if (pf.blocked) throw new PreflightBlockedError(preflightView(pf))
+          }
+        }
         const preview = usesSavedBrand(args)
           ? await service.dnaFromBrand({ userId, source: 'mcp', brandId: args.brandId, offerId: args.offerId, brandKitId: args.brandKitId, productImageIds: args.productImageIds, productImageIdsByAd: args.productImageIdsByAd, photoPerAd: args.photoPerAd, useStyleDna: args.useStyleDna })
           : null

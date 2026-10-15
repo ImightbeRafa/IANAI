@@ -864,7 +864,12 @@ export function createMcpOfferStore(): McpOfferStore | null {
   const db = getSupabaseAdmin()
   if (!db) return null
   const IMAGE_BASE = 'id, product_id, user_id, image_url, kind, label, message_id, created_at'
-  const imageSelect = async () => ((await hasColumn(db, 'product_images', 'is_primary')) ? `${IMAGE_BASE}, is_primary, tags, role, quality, source_url` : IMAGE_BASE)
+  // 0.26.0: + 086 asset_role / approved / approved_at when the migration is applied
+  const imageSelect = async () => {
+    if (!(await hasColumn(db, 'product_images', 'is_primary'))) return IMAGE_BASE
+    const meta = `${IMAGE_BASE}, is_primary, tags, role, quality, source_url`
+    return (await hasColumn(db, 'product_images', 'approved')) ? `${meta}, asset_role, approved, approved_at` : meta
+  }
   const asRow = (data: unknown) => data as unknown as Record<string, unknown>
 
   return {

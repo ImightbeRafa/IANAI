@@ -387,7 +387,7 @@ describe('MCP adpack_* tools', () => {
     // adpack_start takes either brandId (+ offerId) or dna + offer: neither pair is schema-required.
     expect(tools.find((t) => t.name === 'adpack_start')?.inputSchema.required).toBeUndefined()
     expect(tools.find((t) => t.name === 'adpack_status')?.inputSchema.required).toEqual(['packId'])
-    expect(listEnabledMcpTools().filter((t) => t.name.startsWith('adpack_'))).toHaveLength(11)
+    expect(listEnabledMcpTools().filter((t) => t.name.startsWith('adpack_'))).toHaveLength(12) // 0.26.0: + adpack_preflight (free)
     expect(names).toContain('adpack_resize')
     // P0 #2d: the free copy dry run (no approval, no credits).
     expect(names).toContain('adpack_preview')

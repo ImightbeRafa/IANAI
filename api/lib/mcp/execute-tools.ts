@@ -104,6 +104,7 @@ import {
 } from './execute-job.js'
 import { assertMcpCarouselSlideCount } from './limits.js'
 import { assertProductReferenceGate, parseReferenceMode } from './reference-gate.js'
+import { defaultGateDeps, preflightForOffer, preflightView, PreflightBlockedError } from './preflight.js'
 import { mcpGetBrandContext, type McpAuthUser, type McpDbClient } from './user-tools.js'
 import { mcpGuideImage } from './guide-packs.js'
 import type { McpArtifactStore, McpOwnedImage } from './artifact-store.js'
@@ -719,7 +720,7 @@ export async function mcpExecuteImageGenerate(options: {
     throw new Error('execute_image_generate currently supports imageModel "grok-imagine"')
   }
   const selectedReferenceIds = referenceImageIds(options.args.referenceImageIds)
-  const productImageId = optionalTrimmedString(options.args.productImageId, 200)
+  let productImageId = optionalTrimmedString(options.args.productImageId, 200)
   if (productImageId && !selectedReferenceIds.includes(productImageId)) {
     selectedReferenceIds.unshift(productImageId)
   }
@@ -755,6 +756,16 @@ export async function mcpExecuteImageGenerate(options: {
     offerId,
     kind: 'product',
   })
+  if (referenceMode === 'none') assertProductReferenceGate({ toolName: 'execute_image_generate', productRefCount: productAssets.length, referenceMode, referenceImageIds: selectedReferenceIds, productImageId })
+  // 0.26.0: reference gate + preflight BEFORE any quote / charge. Only APPROVED assets are used (confirmed ids, or an automatic varied
+  // pick: hero + another angle / packaging + lifestyle); low quality is a warning (free upscale later); a missing essential refuses here.
+  const pre = await preflightForOffer({ artifactStore: options.artifactStore, userId: options.user.id, brandId, offerId, ctx: ctxPreview, confirmedIds: selectedReferenceIds, productImageId, copy: webArgs.copy, guidePrompt, scene: boundInput.scene, gate: defaultGateDeps({ user: options.user, offerStore: options.offerStore }) })
+  if (pre.blocked) throw new PreflightBlockedError(preflightView(pre))
+  const chosen = [...pre.selection.productIds, ...pre.selection.supportIds]
+  const droppedRefs = selectedReferenceIds.filter((id) => !chosen.includes(id))
+  productImageId = pre.selection.productIds[0]
+  selectedReferenceIds.splice(0, selectedReferenceIds.length, ...chosen)
+  boundInput.productImageId = productImageId
   assertProductReferenceGate({
     toolName: 'execute_image_generate',
     productRefCount: productAssets.length,
@@ -762,6 +773,7 @@ export async function mcpExecuteImageGenerate(options: {
     referenceImageIds: selectedReferenceIds,
     productImageId,
   })
+  const preflightNote = { score: pre.score, ...(pre.warnings.length ? { warnings: pre.warnings } : {}), ...(droppedRefs.length ? { droppedRefs: droppedRefs.map((id) => ({ id, reason: 'not approved, duplicate or unusable — not used' })) } : {}), selection: pre.selection }
   // Validate aspect early (fail before approval if unsupported). 1:1 / 4:5 / 9:16 / 16:9 always work (F3).
   resolveImageRatio(boundInput.aspectRatio)
   const pack = offerIsPack(ctxPreview, offerId, webArgs.productNotes)
@@ -781,7 +793,7 @@ export async function mcpExecuteImageGenerate(options: {
   if (!approvalRequestId) {
     const quote = quoteLegacyActionCredits('image', 'grok-imagine')
     // 0.26.0: an explicit autoRetry:true is disclosed in the approval text (one possible extra paid generation) before the user approves.
-    const retryNote = webArgs.autoRetry ? { summaryEs: `Generar una imagen con Advance · ${autoRetryDisclosure('es')}`, summaryEn: `Generate an image with Advance · ${autoRetryDisclosure('en')}`, extra: { possibleExtraGeneration: { count: 1, reason: 'autoRetry', extraCredits: 0, providerCostLogged: true } } } : {}
+    const retryNote: { summaryEs?: string; summaryEn?: string; extra?: Record<string, unknown> } = webArgs.autoRetry ? { summaryEs: `Generar una imagen con Advance · ${autoRetryDisclosure('es')}`, summaryEn: `Generate an image with Advance · ${autoRetryDisclosure('en')}`, extra: { possibleExtraGeneration: { count: 1, reason: 'autoRetry', extraCredits: 0, providerCostLogged: true } } } : {}
     return issueMcpChatApproval({
       approvalStore: options.approvalStore,
       userId: options.user.id,
@@ -790,6 +802,7 @@ export async function mcpExecuteImageGenerate(options: {
       quotedCreditCost: quote,
       appOrigin: options.appOrigin,
       ...retryNote,
+      extra: { ...(retryNote.extra ?? {}), preflight: preflightNote },
     })
   }
 
@@ -856,6 +869,7 @@ export async function mcpExecuteImageGenerate(options: {
         offerStore: options.offerStore,
         ...fidelityArgs,
         ...webArgs,
+        preflight: preflightNote,
       })
       await finalizeMcpApproval({
         approvalStore: options.approvalStore,
@@ -919,6 +933,7 @@ async function runImageGenerateBody(options: {
   stampLogo?: boolean
   stampPrice?: boolean
   productNotes?: string
+  preflight?: Record<string, unknown>
 }): Promise<Record<string, unknown>> {
   const imageStarted = Date.now()
   const imageGenerationId = generationIdFromApproval(options.approvalRequestId, 'image')
@@ -1203,6 +1218,7 @@ async function runImageGenerateBody(options: {
     ...(productFidelityNote ? { productFidelityNote } : {}),
     ...(fidelity ? { fidelity } : {}),
     paidCalls,
+    ...(options.preflight ? { preflight: options.preflight } : {}),
     ...(postCheck || {}),
     raw,
     prompt: promptUsed,

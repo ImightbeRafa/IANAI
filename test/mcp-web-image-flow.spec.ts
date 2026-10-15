@@ -49,7 +49,8 @@ const LOGO = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJ
 
 async function setup() {
   const ref1 = dataUrl(await png(400, 400, '#ffffff', rects(PRODUCT)))
-  const ref2 = dataUrl(await png(400, 400, '#fdfdfd', rects(PRODUCT)), 'image/png')
+  // a different photo (the part): an identical second shot would be silently deduped by the 0.26.0 reference gate
+  const ref2 = dataUrl(await png(400, 400, '#eeeeee', rects([{ x: 60, y: 200, w: 280, h: 90, c: '#111827' }, { x: 300, y: 60, w: 40, h: 40, c: '#ef4444' }])), 'image/png')
   const kitRef = dataUrl(await png(400, 400, '#fbfbfb', rects(PRODUCT)))
   const db: McpDbClient = {
     async listBusinessesForUser() { return [{ id: 'b1', name: 'Prototipo' }] },

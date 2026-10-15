@@ -200,6 +200,44 @@ export const MCP_TOOL_REGISTRY: McpToolDefinition[] = [
     consumesAdvanceCredits: false,
   },
   {
+    name: 'approve_asset',
+    group: 'brand_workspace',
+    risk: 'sync_write',
+    description:
+      'Brand OWNER only (free): mark a real photo {productImageId} as approved for generation. 0.26.0: execute_image_generate, execute_bulk_posts, execute_campaign_pack and create_ads / adpack_start use ONLY approved assets. Approve the best photos (hero product, another angle / packaging, a lifestyle / b-roll shot). Low-quality photos may be approved: they are used with a warning and upscaled for free. Needs migration 086 (MIGRATION_PENDING otherwise).',
+    enabled: true,
+    requiresApproval: false,
+    consumesAdvanceCredits: false,
+  },
+  {
+    name: 'unapprove_asset',
+    group: 'brand_workspace',
+    risk: 'sync_write',
+    description: 'Brand OWNER only (free): remove the approval of an asset {productImageId}; it is no longer used for generation.',
+    enabled: true,
+    requiresApproval: false,
+    consumesAdvanceCredits: false,
+  },
+  {
+    name: 'set_asset_role',
+    group: 'brand_workspace',
+    risk: 'sync_write',
+    description: 'Set the role of an asset {productImageId, assetRole: product | b-roll | unboxing | lifestyle | packaging | logo | null (infer)}. The generation picks varied refs by role: hero product + another angle / packaging + one lifestyle / b-roll. Free.',
+    enabled: true,
+    requiresApproval: false,
+    consumesAdvanceCredits: false,
+  },
+  {
+    name: 'adpack_preflight',
+    group: 'guide_studio',
+    risk: 'read',
+    description:
+      'CALL THIS FIRST before any paid image tool (free, no approval): {brandId, offerId?, productImageId? / referenceImageIds? / productImageIds?, copy?, brief?, scene?}. Returns score 0–100 with itemised reasons — essentials (an APPROVED product photo that downloads, offer name, price, a brief/copy) and quality (reference resolution / compression / screenshot / burned-in text, variety of roles, brand kit logo-colours-fonts, CTA / contact) — plus the exact photos the generation will use (selection) and warnings in Spanish / English. Execute tools and adpack_start refuse BEFORE charging when the score is < 70, which only happens when an essential is missing; low photo quality alone never blocks (it is warned and upscaled for free). When blocked, message lists exactly what to fix (approve_asset <id>, import_image a ≥1600 px photo, update_offer {price}).',
+    enabled: true,
+    requiresApproval: false,
+    consumesAdvanceCredits: false,
+  },
+  {
     name: 'create_upload_url',
     group: 'library_sessions',
     risk: 'sync_write',
@@ -225,7 +263,7 @@ export const MCP_TOOL_REGISTRY: McpToolDefinition[] = [
     group: 'brand_workspace',
     risk: 'read',
     description:
-      'List product, context, and generated images for an owned brand/offer: stored HTTPS URLs, reusable productImageId values and, per product photo, role (hero|part|box|contents|in_use|detail), partName, tags, isPrimary, quality, sourceUrl and label — audit the photo setup after importing. Without kind it also returns kitAssets (logo + variants, reference images, winners, documents).',
+      'List product, context, and generated images for an owned brand/offer: stored HTTPS URLs, reusable productImageId values and, per product photo, role (hero|part|box|contents|in_use|detail), partName, tags, isPrimary, quality, sourceUrl and label — audit the photo setup after importing. 0.26.0: also assetRole (product|b-roll|unboxing|lifestyle|packaging|logo), approved (only approved assets are used for generation — approve_asset) and gate (reference check: size, compression, screenshot / burned-in text warnings; only unreachable files / non-images are refused; duplicateOf for near-duplicates). Without kind it also returns kitAssets (logo + variants, reference images, winners, documents).',
     enabled: true,
     requiresApproval: false,
     consumesAdvanceCredits: false,
@@ -498,7 +536,7 @@ export const MCP_TOOL_REGISTRY: McpToolDefinition[] = [
     group: 'execute_studio',
     risk: 'execute',
     description:
-      'Same ad as the web chat (/chat generate), 0.26.0: the model designs the WHOLE ad — scene, composition, typography and the on-image copy — from the web art-director brief, with the CONFIRMED real product photos (productImageId / referenceImageIds; never the kit reference images) as /images/edits references under PRODUCT LOCK and the kit logo as a reference. One Grok Imagine call (2k, credits). Pass copy (on-image guion: headline, price line, CTA), textDensity, postStyle, ctaStrength; `scene` is a BINDING place; allowedProps (default none) lists the only extra objects; layoutCap (default true) keeps headline + 1 price + 1 facts + 1 CTA on the image and returns the rest as copyOverflow + a ready caption. The prompt keeps text inside the Instagram safe margins (qa.safeZones reports violations). Printed packs / pouches / boxes: the REAL pack pixels are swapped into the located box after generation (packSwap; deterministic, never another generation); productFidelity is deprecated/ignored for them. The fidelity check is a WARNING only (fidelity_warning). Retries: NONE by default; autoRetry:true allows at most ONE corrective regeneration (disclosed in the approval). Every paid call is logged at its real cost (result paidCalls). Opt-ins: stampLogo / stampPrice (code stamps the real logo / exact price), compositeLayers:true (old scene-only + code layout), productFidelity (exact) (non-pack only: real pixels on a generated plate), enforceSafeZones (legacy scale-in). Ask in chat via userPrompt + confirm_execute — do not lead with a raw approval URL. ' +
+      'Same ad as the web chat (/chat generate), 0.26.0: the model designs the WHOLE ad — scene, composition, typography and the on-image copy — from the web art-director brief, with the CONFIRMED real product photos (productImageId / referenceImageIds; never the kit reference images) as /images/edits references under PRODUCT LOCK and the kit logo as a reference. One Grok Imagine call (2k, credits). Pass copy (on-image guion: headline, price line, CTA), textDensity, postStyle, ctaStrength; `scene` is a BINDING place; allowedProps (default none) lists the only extra objects; layoutCap (default true) keeps headline + 1 price + 1 facts + 1 CTA on the image and returns the rest as copyOverflow + a ready caption. The prompt keeps text inside the Instagram safe margins (qa.safeZones reports violations). Printed packs / pouches / boxes: the REAL pack pixels are swapped into the located box after generation (packSwap; deterministic, never another generation); productFidelity is deprecated/ignored for them. The fidelity check is a WARNING only (fidelity_warning). Retries: NONE by default; autoRetry:true allows at most ONE corrective regeneration (disclosed in the approval). Every paid call is logged at its real cost (result paidCalls). Opt-ins: stampLogo / stampPrice (code stamps the real logo / exact price), compositeLayers:true (old scene-only + code layout), productFidelity (exact) (non-pack only: real pixels on a generated plate), enforceSafeZones (legacy scale-in). Only APPROVED assets are used (confirmed ids, or an automatic varied pick); call adpack_preflight first (free): this tool refuses before charging when its score is < 70 (a missing essential). Ask in chat via userPrompt + confirm_execute — do not lead with a raw approval URL. ' +
       'After approve, returns quickly with jobId (status=running); poll get_execute_result until completed (includes imageUrl). Same approvalRequestId is idempotent.',
     enabled: true,
     requiresApproval: true,
@@ -520,7 +558,7 @@ export const MCP_TOOL_REGISTRY: McpToolDefinition[] = [
     group: 'execute_studio',
     risk: 'execute',
     description:
-      'Prefer create_ads mode pack for static ads. Generate varied posts for selected angles (6 or 24 credits each; may expand product refs; one in-chat approval via confirm_execute; runs exactly count/angleIds or answers PLAN_CHANGED). productImageIds = product photo pool (first = hero). ' +
+      'Prefer create_ads mode pack for static ads. Generate varied posts for selected angles (6 or 24 credits each; may expand product refs; one in-chat approval via confirm_execute; runs exactly count/angleIds or answers PLAN_CHANGED). productImageIds = product photo pool (first = hero). 0.26.0: the model designs each post (web parity); only APPROVED photos are used; call adpack_preflight first — it refuses before charging when an essential is missing. ' +
       'After approve, returns jobId + statusMessage; poll get_execute_result until completed.',
     enabled: true,
     requiresApproval: true,
@@ -531,7 +569,7 @@ export const MCP_TOOL_REGISTRY: McpToolDefinition[] = [
     group: 'execute_studio',
     risk: 'execute',
     description:
-      'Prefer create_ads mode pack for static ads. Launch pack: angles → scripts → posts with one in-chat approval (confirm_execute) and a quoted total (runs exactly that count or answers PLAN_CHANGED). ' +
+      'Prefer create_ads mode pack for static ads. Launch pack: angles → scripts → posts with one in-chat approval (confirm_execute) and a quoted total (runs exactly that count or answers PLAN_CHANGED). 0.26.0: only APPROVED photos are used; call adpack_preflight first — it refuses before charging when an essential is missing. ' +
       'After approve, returns jobId + statusMessage; poll get_execute_result until completed.',
     enabled: true,
     requiresApproval: true,
@@ -648,7 +686,7 @@ export const MCP_TOOL_REGISTRY: McpToolDefinition[] = [
     group: 'execute_studio',
     risk: 'execute',
     description:
-      'Ad Pack (create_ads mode pack routes here): start a pack of sell-ready static ads (credits per finished ad). For an existing brand pass {brandId, offerId, size, brief?} INSTEAD of dna/offer — the server builds them from the saved brand (no adpack_from_brand call required). ' +
+      'Ad Pack (create_ads mode pack routes here): start a pack of sell-ready static ads (credits per finished ad). 0.26.0: call adpack_preflight first (free); with a saved brand this tool refuses before quoting when the preflight score is < 70 (missing approved product photo, offer name, price or brief) and only APPROVED photos are used. For an existing brand pass {brandId, offerId, size, brief?} INSTEAD of dna/offer — the server builds them from the saved brand (no adpack_from_brand call required). ' +
       'Default ratios 4:5 (feed) + 9:16 (story); 1:1 on request or later free via adpack_resize. locale (e.g. "es-CR") makes the register a hard rule (voseo for CR); forbiddenPhrases/forbiddenClaims are verified on image text, caption and script. ' +
       'The approval shows the exact plan {items, unitCost, total}; on retry the plan is recomputed and, if count or credits differ, the tool answers status=plan_changed (code PLAN_CHANGED, approved vs planned) and runs nothing — ask the user again. ' +
       'brief = optional campaign context from the user (e.g. "Black Friday, focus on bundles"); it steers theme only and is never used as a fact. ' +
