@@ -368,3 +368,49 @@ export function bandZones(ratio: string) {
   const m = safeZoneMargins(ratio)
   return { top: m.top, bottom: m.bottom }
 }
+
+/** Round 9: extend a raw RGB picture by `top` / `bottom` rows with the texture-carrying continuation used by the shifts (bottom = the flipped top case). */
+async function extendRows(data: Buffer, W: number, H: number, top: number, bottom: number, seed: number): Promise<{ data: Buffer; H: number }> {
+  const H2 = H + top + bottom
+  const out = Buffer.alloc(W * H2 * 3)
+  data.copy(out, W * top * 3)
+  if (top > 0) {
+    const { fill, edge } = continuationAbove(data, W, H, 0, top, seed)
+    fill.copy(out, 0, 0, W * top * 3)
+    softenJoin(out, Buffer.from(out), W, top, Math.max(4, Math.round(H * 0.012)), edge, 1)
+  }
+  if (bottom > 0) {
+    const flipped = await sharp(data, { raw: { width: W, height: H, channels: 3 } }).flip().raw().toBuffer()
+    const { fill, edge } = continuationAbove(flipped, W, H, 0, bottom, seed + 4)
+    const back = await sharp(fill, { raw: { width: W, height: bottom, channels: 3 } }).flip().raw().toBuffer()
+    back.copy(out, W * (top + H) * 3, 0, W * bottom * 3)
+    softenJoin(out, Buffer.from(out), W, top + H - 1, Math.max(4, Math.round(H * 0.012)), edge, -1)
+  }
+  return { data: out, H: H2 }
+}
+
+/** Smallest scale the canvas extension may use (the picture keeps ≥ 86 % of its size; never a visible frame: every side is a textured continuation). */
+export const MIN_EXTEND_SCALE = 0.86
+
+/**
+ * Round 9: "extend the canvas" — the picture is scaled to `scale` (≥ 0.86) and the canvas around it is continued from the scene on every side (no flat frame),
+ * same pixel size. `anchorY` = share of the freed height that goes above the picture (0.3 = most of the new room is BELOW, for the CTA).
+ * Returns the bytes and the mapping of a normalised box into the new picture.
+ */
+export async function extendCanvas(bytes: Buffer, scale: number, anchorY = 0.3, quality = 93): Promise<{ bytes: Buffer; map: (b: NB) => NB; scale: number }> {
+  const meta = await sharp(bytes).metadata()
+  const W = meta.width!, H = meta.height!
+  const s = Math.max(MIN_EXTEND_SCALE, Math.min(1, scale))
+  const ws = Math.round(W * s), hs = Math.round(H * s)
+  const small = await sharp(bytes).rotate().removeAlpha().resize(ws, hs, { kernel: 'lanczos3' }).raw().toBuffer()
+  const top = Math.round((H - hs) * anchorY), bottom = H - hs - top
+  const left = Math.floor((W - ws) / 2), right = W - ws - left
+  const v = await extendRows(small, ws, hs, top, bottom, 23)
+  // sides: rotate so the left / right edges become top / bottom, extend, rotate back
+  const rot = await sharp(v.data, { raw: { width: ws, height: v.H, channels: 3 } }).rotate(90).raw().toBuffer()
+  // after rotate(90) clockwise: new width = v.H, new height = ws; the top rows are the LEFT edge of the picture
+  const hx = await extendRows(rot, v.H, ws, left, right, 31)
+  const back = await sharp(hx.data, { raw: { width: v.H, height: hx.H, channels: 3 } }).rotate(-90).jpeg({ quality }).toBuffer()
+  const map = (b: NB): NB => ({ x0: (left + b.x0 * ws) / W, x1: (left + b.x1 * ws) / W, y0: (top + b.y0 * hs) / H, y1: (top + b.y1 * hs) / H })
+  return { bytes: back, map, scale: s }
+}

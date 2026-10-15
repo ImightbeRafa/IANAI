@@ -243,7 +243,7 @@ describe('prompt (MCP path): natural full-bleed scene, no strips, product low; p
     expect(parseWebPostArgs({}).productNotes).toBeUndefined()
   })
   it('MCP 0.20.0 advertises the new features', () => {
-    expect(MCP_VERSION).toBe('0.21.0')
+    expect(MCP_VERSION).toBe('0.22.0')
     for (const f of ['seam_blend_no_letterbox', 'text_never_over_product_make_room', 'severity_factors_retry', 'product_notes_input', 'exact_uses_code_layout']) expect(MCP_FEATURES).toContain(f as never)
   })
 })

@@ -411,10 +411,11 @@ export type ToolProductFidelity = 'exact' | 'generated'
  * `productFidelity` for single-image tools: default 'generated' (the web-app Grok flow with PRODUCT LOCK);
  * 'exact' (real-pixel cutout composite) is opt-in. Exact without a photo is an input error.
  */
-export function resolveToolProductFidelity(raw: unknown, hasProductRef: boolean): ToolProductFidelity {
+export function resolveToolProductFidelity(raw: unknown, hasProductRef: boolean, opts: { /** Round 9 (MCP): printed packs / pouches default to the real-pixel path. */ defaultExact?: boolean } = {}): ToolProductFidelity {
   if (raw !== undefined && raw !== null && raw !== 'exact' && raw !== 'generated') throw new Error('productFidelity must be "exact" or "generated"')
   if (raw === 'exact' && !hasProductRef) throw new Error('productFidelity "exact" needs a product photo (productImageId / product reference).')
   if (raw === 'exact') return 'exact'
+  if ((raw === undefined || raw === null) && opts.defaultExact && hasProductRef) return 'exact'
   // Web-app path by default (Grok /edits + PRODUCT LOCK); 'exact' (cutout composite) is opt-in only.
   return 'generated'
 }

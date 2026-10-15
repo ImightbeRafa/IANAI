@@ -18,6 +18,8 @@ export type ExtraObjectsFinding = {
   /** Clusters explained by the `allowedProps` the caller listed. */
   budget: number
   clusters: Array<{ hue: string; share: number; /** Where those pixels sit (fractions of the picture) — the layout keeps the CTA / text off it. */ box?: NormalizedProductBox }>
+  /** Round 9: thin cable-like structures found by shape (scene-objects.findThinStructures). */
+  cables?: Array<{ box: NormalizedProductBox; share: number }>
   /** Soft light regions ignored as lighting (a window's sun glow), not props. */
   ignoredGlows?: string[]
   note: string

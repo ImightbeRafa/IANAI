@@ -6,7 +6,7 @@
  *      background above it (scene-prep.shiftSceneDown) as long as nothing important scrolls out at the bottom, and the layout is computed again.
  */
 import { layoutAdLayers, type AdBlocks, type AdLayoutReport, type LayoutInput } from './layout-ad.js'
-import { blendSeams, cropZoomSeams, detectSeams, MAX_SHIFT, shiftSceneDown, shiftSceneUp, type CropZoomReport, type Seam } from './scene-prep.js'
+import { blendSeams, cropZoomSeams, detectSeams, extendCanvas, MAX_SHIFT, shiftSceneDown, shiftSceneUp, type CropZoomReport, type Seam } from './scene-prep.js'
 
 export const TEXT_SCALE_OK = 0.8
 
@@ -14,8 +14,10 @@ export type ScenePrepReport = {
   seams: { checked: boolean; found: Seam[]; blended?: boolean; remaining?: number; /** Strips NOT blended because the neighbouring content is detailed. */ skipped?: Array<{ edge: 'top' | 'bottom'; detail: number }>; /** Round 8: the strips were cut off and the picture zoomed back (no blend). */ cropZoom?: CropZoomReport; note?: string }
   /** Round 8: the CTA had no free slot under the product: the picture was moved UP and the bottom extended. */
   roomBelow?: { attempted: boolean; applied: boolean; shiftPx?: number; shiftShare?: number; note: string }
-  /** Round 8: no CTA slot was free of the product / accessory even after making room: the button was NOT drawn (it stays in the caption). */
-  ctaOmitted?: boolean
+  /** Round 9: no CTA slot was free of the product / accessory even after moving the picture up by the maximum: the button IS still drawn (≥ 86 % size) on the least bad slot and flagged (qa.ctaBlocked → autoRetry). The CTA is never dropped. */
+  ctaBlocked?: boolean
+  /** Round 9: the canvas was extended (picture scaled to `scale`, every side continued from the scene, no frame) so the CTA got a free slot. */
+  extended?: { scale: number; anchorY: number; note: string }
   /** Round 8: second facts line that fitted on the image (kept off the caption). */
   extraFactUsed?: string
   room?: { attempted: boolean; applied: boolean; shiftPx?: number; shiftShare?: number; before: { corridor: string; scale: number }; after?: { corridor: string; scale: number }; note?: string }
@@ -115,7 +117,7 @@ export async function prepareAndLayout(input: Omit<LayoutInput, 'avoid' | 'block
     if (objBottom1 == null) info.note = 'objects could not be located: the picture was not moved'
     else {
       // smallest upward shift that frees a CTA slot (the controller beside the slot does not matter, only what is under the pill)
-      const steps = [0.015, 0.03, 0.045, 0.06, 0.07, 0.08, 0.1, 0.13].map((f) => Math.round(f * H1)).filter((d) => d <= maxPx)
+      const steps = [0.015, 0.03, 0.045, 0.06, 0.07, 0.08, 0.1, 0.13, 0.16, MAX_SHIFT].map((f) => Math.round(f * H1)).filter((d) => d <= maxPx)
       info.note = 'no upward shift freed a CTA slot without putting the text over the product'
       for (const need of steps) {
         const up = await shiftSceneUp(sceneBytes, need)
@@ -126,7 +128,7 @@ export async function prepareAndLayout(input: Omit<LayoutInput, 'avoid' | 'block
           const d3 = await layoutAdLayers({ ...input, blocks: v.blocks, bytes: up, avoid: upAvoid })
           const textOk = !d3.report.text.textOverProduct || r1.text.textOverProduct
           // a CTA covering the product is a worse defect than text a little smaller (or one facts line less): accept down to 75 % (reported as a text-scale warning)
-          if (textOk && d3.report.text.scale >= Math.min(0.75, r1.text.scale) && d3.report.cta.status === 'drawn' && !d3.report.cta.blocked) {
+          if (textOk && d3.report.text.scale >= Math.min(0.72, r1.text.scale) && d3.report.cta.status === 'drawn' && !d3.report.cta.blocked) {
             const rank = (d3.report.text.scale >= TEXT_SCALE_OK ? 10 : 0) + (v.dropExtra ? 0 : 1) + d3.report.text.scale
             if (!best || rank > best.rank) best = { d3, v, rank }
           }
@@ -143,12 +145,30 @@ export async function prepareAndLayout(input: Omit<LayoutInput, 'avoid' | 'block
       }
     }
     scenePrep.roomBelow = info
-    // Still no free slot: the CTA is NEVER drawn over the product / accessory. It is left out of the picture (it stays in the caption) and reported as a defect.
+    // Round 9: moving up was not enough → EXTEND the canvas (picture ≥ 86 % of its size, the new room continued from the scene on every side, mostly below)
     if (!info.applied && done.report.cta.status === 'drawn' && done.report.cta.blocked) {
-      blocksCur = { ...blocksCur, cta: undefined }
-      done = await lay(sceneBytes, sceneAvoid)
-      scenePrep.ctaOmitted = true
+      let pick: { d: Awaited<ReturnType<typeof layoutAdLayers>>; bytes: Buffer; avoid: NBox[]; scale: number; anchorY: number; rank: number } | null = null
+      for (const scale of [0.94, 0.9, 0.86]) {
+        for (const anchorY of [0.25, 0.5]) {
+          const ext = await extendCanvas(sceneBytes, scale, anchorY)
+          const extAvoid = sceneAvoid.map(ext.map)
+          const d4 = await layoutAdLayers({ ...input, blocks: blocksCur, bytes: ext.bytes, avoid: extAvoid })
+          const textOk = !d4.report.text.textOverProduct || r1.text.textOverProduct
+          if (textOk && d4.report.text.scale >= Math.min(0.72, r1.text.scale) && d4.report.cta.status === 'drawn' && !d4.report.cta.blocked) {
+            const rank = scale * 10 + d4.report.text.scale
+            if (!pick || rank > pick.rank) pick = { d: d4, bytes: ext.bytes, avoid: extAvoid, scale, anchorY, rank }
+            break // the largest picture that works, most of the new room below
+          }
+        }
+        if (pick) break
+      }
+      if (pick) {
+        done = pick.d; sceneBytes = pick.bytes; sceneAvoid = pick.avoid
+        scenePrep.extended = { scale: pick.scale, anchorY: pick.anchorY, note: `canvas extended: picture at ${Math.round(pick.scale * 100)}% with the scene continued on every side (no frame) so the CTA has a free slot under the product` }
+      }
     }
+    // Round 9: still no free slot: the CTA is NEVER dropped. It stays on the least bad slot (≥ 86 % size) and is flagged as a defect so autoRetry regenerates.
+    if (!info.applied && done.report.cta.status === 'drawn' && done.report.cta.blocked) scenePrep.ctaBlocked = true
   }
   return { bytes: done.bytes, sceneBytes, sceneAvoid, report: done.report, scenePrep }
 }

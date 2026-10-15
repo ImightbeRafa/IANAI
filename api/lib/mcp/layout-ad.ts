@@ -18,6 +18,7 @@ import { fitText } from '../adpack/render/text.js'
 import { edgeMap, rasterize, renderCtaPill, type Box, type CompositeInput, type CompositeReport } from './composite-ad.js'
 import { PRICE_RE } from './copy-layout.js'
 import { safeZoneMargins } from './safe-zones.js'
+import { trimLogoPadding } from './logo-check.js'
 
 export type AdBlocks = { headline?: string; price?: string; facts?: string[]; cta?: string }
 
@@ -151,9 +152,16 @@ export async function layoutAdLayers(input: LayoutInput): Promise<{ bytes: Buffe
   // ---- 1. reserved geometry: logo row (top) and CTA row (bottom) --------------------------------------------------------
   let logoBox: Box | null = null
   let logoAspect = 0
-  if (input.logo) {
+  let logoTrim: { before: [number, number]; after: [number, number] } | undefined
+  let logoAsset: Buffer | null = input.logo ?? null
+  if (logoAsset) {
+    // Round 9: fit the mark by its real aspect — cut transparent / flat padding first
+    const t = await trimLogoPadding(logoAsset)
+    if (t.trimmed && t.before && t.after) { logoAsset = t.bytes; logoTrim = { before: t.before, after: t.after } }
+  }
+  if (logoAsset) {
     try {
-      const lm = await sharp(input.logo).metadata()
+      const lm = await sharp(logoAsset).metadata()
       if (!lm.width || !lm.height) throw new Error('logo asset has no size')
       logoAspect = lm.width / lm.height
       let lh = Math.round(H * (story ? 0.07 : 0.078))
@@ -348,7 +356,8 @@ export async function layoutAdLayers(input: LayoutInput): Promise<{ bytes: Buffe
     // Round 8: the pill is rendered at 100 %, 86 % and 74 % of its height: when every slot of the full-size pill covers the located product / an accessory (the controller
     // on the table), a narrower pill may still fit beside it. Smaller steps carry a small penalty so the full size wins whenever it is free.
     const pills: Array<{ pill: Awaited<ReturnType<typeof renderCtaPill>>; btnW: number; btnH: number; step: number }> = []
-    for (const [k, f] of [[0, 1], [1, 0.86], [2, 0.74]] as Array<[number, number]>) {
+    // Round 9: never below 86 % of the nominal pill (a tiny CTA reads as an afterthought); room is made by moving the picture instead
+    for (const [k, f] of [[0, 1], [1, 0.86]] as Array<[number, number]>) {
       const h = Math.round(btnH * f)
       const pl = await renderCtaPill({ text: cta, btnH: h, W, scrimMean, palette: input.palette, fonts: input.fonts })
       pills.push({ pill: pl, btnW: pl.btnW, btnH: h, step: k })
@@ -435,43 +444,32 @@ export async function layoutAdLayers(input: LayoutInput): Promise<{ bytes: Buffe
       }
       const { x: lx, w: lw, h: lh } = best!
       const ly = logoBox.y
-      const logoPng = await sharp(input.logo!).rotate().ensureAlpha().resize(lw, lh, { fit: 'fill', kernel: 'lanczos3' }).png().toBuffer()
+      const logoPng = await sharp(logoAsset!).rotate().ensureAlpha().resize(lw, lh, { fit: 'contain', background: { r: 0, g: 0, b: 0, alpha: 0 }, kernel: 'lanczos3' }).png().toBuffer()
       const { channels, data } = await sharp(logoPng).raw().toBuffer({ resolveWithObject: true }).then((r) => ({ channels: r.info.channels, data: r.data }))
       let lr = 0, lg = 0, lb = 0, ln = 0, opaque = 0
       for (let i = 0; i < data.length; i += channels) { if (data[i + 3] > 200) { lr += data[i]; lg += data[i + 1]; lb += data[i + 2]; ln++ } opaque++ }
       const logoMean: Rgb = ln ? { r: lr / ln, g: lg / ln, b: lb / ln } : { r: 255, g: 255, b: 255 }
       const under = lumaStats(raw, W, H, { x: lx, y: ly, w: lw, h: lh })
       const contrast = Math.round(contrastFromLuminance(luminance(logoMean), luminance(under.mean)) * 100) / 100
-      const selfContained = ln / Math.max(1, opaque) >= 0.85
-      let glow = false
-      if (!selfContained && contrast < 2.5) {
-        const tone = luminance(logoMean) > 0.5 ? { r: 0, g: 0, b: 0 } : { r: 255, g: 255, b: 255 }
-        const gl = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}"><defs><radialGradient id="g"><stop offset="0" stop-color="${toHex(tone)}" stop-opacity="0.5"/><stop offset="1" stop-color="${toHex(tone)}" stop-opacity="0"/></radialGradient></defs><ellipse cx="${lx + lw / 2}" cy="${ly + lh / 2}" rx="${lw * 0.75}" ry="${lh * 1.1}" fill="url(#g)"/></svg>`
-        layers.push({ input: rasterize(gl), left: 0, top: 0 })
-        glow = true
-      }
-      // Round 8: below 4.5:1 over the picture (bright foliage under a dark badge …) the logo gets a soft scrim in the tone that restores it; the report keeps both numbers
-      let scrim: { tone: string; alpha: number } | undefined
+      // Round 9: below 4.5:1 over the picture the logo gets a SOLID plate (no soft glow / blurred halo — it read as a smudge on the navy wall): the plate colour is
+      // the brand colour / white / ink with the best contrast against the logo itself (a brand colour wins whenever it reaches 4.5:1)
+      const glow = false
+      let plate: { fill: string; contrast: number } | undefined
       let contrastFinal = contrast
-      if (contrast < 4.5 && !glow) {
-        const tone = luminance(logoMean) > 0.5 ? { r: 0, g: 0, b: 0 } : { r: 255, g: 255, b: 255 }
-        let alpha = 0.2
-        for (; alpha <= 0.7; alpha += 0.1) {
-          const eff = blend(tone, alpha * 0.85, under.mean) // the blurred plate is a little weaker than its nominal alpha
-          if (contrastFromLuminance(luminance(logoMean), luminance(eff)) >= 4.6) break
-        }
-        alpha = Math.min(alpha, 0.7)
-        const eff = blend(tone, alpha * 0.85, under.mean)
-        contrastFinal = Math.round(contrastFromLuminance(luminance(logoMean), luminance(eff)) * 100) / 100
-        const padx = Math.round(lw * 0.14), pady = Math.round(lh * 0.14)
-        const sg = Math.max(3, Math.round(lh * 0.1))
-        const plate = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}"><defs><filter id="p" x="-30%" y="-30%" width="160%" height="160%"><feGaussianBlur stdDeviation="${sg}"/></filter></defs><rect x="${lx - padx}" y="${ly - pady}" width="${lw + 2 * padx}" height="${lh + 2 * pady}" rx="${Math.round(lh * 0.28)}" fill="${toHex(tone)}" fill-opacity="${alpha}" filter="url(#p)"/></svg>`
-        layers.push({ input: rasterize(plate), left: 0, top: 0 })
-        scrim = { tone: toHex(tone), alpha: Math.round(alpha * 100) / 100 }
+      if (contrast < 4.5) {
+        const pal = [input.palette?.secondary, input.palette?.primary, input.palette?.accent].map((c) => parseColor(c)).filter((c): c is Rgb => Boolean(c))
+        const opts = [...pal, WHITE, INK].map((c) => ({ c, k: contrastFromLuminance(luminance(logoMean), luminance(c)) }))
+        const brandOk = opts.slice(0, pal.length).filter((o) => o.k >= 4.5).sort((a, b) => b.k - a.k)[0]
+        const pick = brandOk ?? opts.sort((a, b) => b.k - a.k)[0]
+        const padx = Math.round(lh * 0.22), pady = Math.round(lh * 0.16)
+        const plateSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}"><rect x="${lx - padx}" y="${ly - pady}" width="${lw + 2 * padx}" height="${lh + 2 * pady}" rx="${Math.round(Math.min(lh, lw) * 0.22)}" fill="${toHex(pick.c)}"/></svg>`
+        layers.push({ input: rasterize(plateSvg), left: 0, top: 0 })
+        contrastFinal = Math.round(pick.k * 100) / 100
+        plate = { fill: toHex(pick.c), contrast: contrastFinal }
       }
       layers.push({ input: logoPng, left: lx, top: ly })
       const box = { x: lx, y: ly, w: lw, h: lh }
-      report.logo = { status: 'drawn', box, contrast: contrastFinal, glow, ...(scrim ? { scrim, contrastBefore: contrast } : {}) }
+      report.logo = { status: 'drawn', box, contrast: contrastFinal, glow, ...(plate ? { plate, contrastBefore: contrast } : {}), ...(logoTrim ? { trimmed: logoTrim } : {}) }
       elements.push({ id: 'logo', role: 'logo', box, contrast: contrastFinal, fits: true })
     } catch (err) {
       report.logo = { status: 'unavailable', reason: `logo asset could not be drawn: ${err instanceof Error ? err.message.slice(0, 120) : 'error'}` }

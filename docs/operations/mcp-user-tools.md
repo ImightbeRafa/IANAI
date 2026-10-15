@@ -37,6 +37,17 @@ Enabled tools now:
 
 **Offers + photos (sync write, no credits, 0.11):** `create_offer`, `update_offer`, `set_primary_product_image`, `tag_product_image`, `create_upload_url` → PUT → `finalize_upload`.
 
+### 0.22.0 — CTA never dropped, lock scoped to the photo role, cable / main-product props check, logo trim + solid plate + wordmark first, pack-print OCR + exact default for packs, raw scene saved
+
+Registry / server version **0.22.0**. **No migration**, no new env/secret/binding/route/cron, no new npm dependency. **Runtime image:** `tesseract-ocr` (+ `eng`, `spa`) via apt in the Dockerfile runtime stage. Proofs: `test/round9.spec.ts` (crops of the round-8 live posts + the real PatchHouse photo, mock xAI), `test/web-mcp-parity.spec.ts` (web request unchanged).
+
+- **CTA:** 100 % / 86 % pill only; picture moved up (≤ 20 %), then canvas extended (picture ≥ 86 %, textured continuation on every side, `scenePrep.extended`); still blocked → drawn anyway + `qa.ctaBlocked` (severity 8, autoRetry). Never omitted.
+- **Lock scope (`lockScope`):** controller / box / contents photo as the product photo → the main product's attributes are not sent and the prompt says to show only that object; accessory attributes only for attached photos.
+- **Props:** a thin cable-like object is flagged (`propsPolicy.check.cables`, `props_warning`) unless allowed; with a box / part photo the main product photo is feature-matched too (duplicate / extra product).
+- **Logo:** padding trimmed, real aspect (`compositeLayers.logo.trimmed`), kit logo variants: wordmark → primary → badge → `logo_url` → icon; solid plate (`logo.plate`) under 4.5:1 instead of glow / scrim.
+- **Packs:** `qa.packText` (tesseract OCR of the printing vs the reference; ≥ 2 misspelled words = fail, `suggestedFallback: exact`); packs / pouches default to `productFidelity:"exact"` when omitted (`productFidelityNote`).
+- **Raw:** result `raw { sceneUrl, finalUrl }` (the scene before compositing, storage only).
+
 ### 0.21.0 — scale-in never with `compositeLayers`, seam blend refusal, generic product lock, forbidden-claims filter, favicon-logo warning
 
 Registry / server version **0.21.0**. **No migration**, no new env/secret/binding/route/cron, no new dependency, no new font file. Proofs: `test/round8.spec.ts` (Sleeping Patches scene reconstructed from Content's post, round-7 scenes A/B, mock xAI), `test/web-mcp-parity.spec.ts` (web request unchanged).
@@ -256,7 +267,7 @@ Authorize always redirects to the Supabase **Site URL** (`https://advanceai.stud
 
 ## Code map
 - Host: `api/mcp.ts`, `api/lib/mcp/protocol.ts`
-- Registry: `api/lib/mcp/tool-registry.ts` (0.21.0)
+- Registry: `api/lib/mcp/tool-registry.ts` (0.22.0)
 - Offers / photos / uploads: `api/lib/mcp/offer-tools.ts`, `api/lib/mcp/upload-tools.ts`, `api/lib/mcp/asset-rehost.ts`, `api/lib/adpack/offer-profile.ts`, `api/lib/brand-profile.ts`, `api/lib/placeholder-guard.ts`, `api/lib/product-image-order.ts`, migration `085`
 - Brand kits: `api/lib/mcp/brand-kit-tools.ts`, `api/lib/brand-kit-resolve.ts`, migration `081`
 - Audit: `api/lib/mcp/tool-audit.ts`; MCP caps: `api/lib/mcp/limits.ts`

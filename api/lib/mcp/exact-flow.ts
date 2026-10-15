@@ -8,7 +8,7 @@
  * blocks a delivered image, retries a paid call or changes credits.
  */
 import { scrubCopy, uniqueClaims } from './claims-filter.js'
-import { logoIconCheck } from './logo-check.js'
+import { loadAdLogo, logoIconCheck } from './logo-check.js'
 import { edgeRoughness, QA_THRESHOLDS } from '../adpack/qa-gate.js'
 import { generateExactProductImage, type ExactImageInput, type ExactImageResult } from '../adpack/fidelity/pipeline.js'
 import { measureHalo, type HaloReport } from '../adpack/fidelity/halo.js'
@@ -24,6 +24,8 @@ import type { McpBrandContext } from './user-tools.js'
 
 export type ExactAdOutput = {
   imageDataUrl: string
+  /** Round 9: the composed plate (real product on the generated scene) before the ad layers — stored as the raw scene. */
+  rawSceneDataUrl?: string
   width: number
   height: number
   costUsd: number
@@ -94,10 +96,12 @@ export async function generateExactWebStyleAd(input: {
   const warnings = [...exact.warnings]
 
   let logo: string | undefined
-  if (kit?.logoUrl) {
-    const fetched = await fetchPublicImageDetailed(kit.logoUrl)
-    if ('dataUrl' in fetched) logo = fetched.dataUrl
-    else warnings.push(`logo not drawn: ${fetched.failure.url} → ${fetched.failure.status ? `HTTP ${fetched.failure.status}` : fetched.failure.reason}`)
+  let logoUrlUsed: string | null = kit?.logoUrl ?? null
+  {
+    // Round 9: wordmark / primary variant first, never a favicon / app icon while a non-icon logo loads
+    const picked = await loadAdLogo(kit, async (u) => { const f = await fetchPublicImageDetailed(u); return 'dataUrl' in f ? Buffer.from(f.dataUrl.slice(f.dataUrl.indexOf(',') + 1), 'base64') : { error: `${f.failure.url} → ${f.failure.status ? `HTTP ${f.failure.status}` : f.failure.reason}` } })
+    if (picked.bytes) { logo = `data:image/png;base64,${picked.bytes.toString('base64')}`; logoUrlUsed = picked.url }
+    else if (picked.notes.length) warnings.push(`logo not drawn: ${picked.notes[0].replace(/^logo asset not loaded: /, '')}`)
   }
 
   // Round 7: the SAME code layout as the generated flow (layout-ad): real product pixels on the plate → flat strips blended away → text never on the product
@@ -145,12 +149,12 @@ export async function generateExactWebStyleAd(input: {
   if (report.logo.status === 'unavailable') qa.logoUnavailable = true
   if (removedClaims.length) { qa.removedClaims = removedClaims; qa.warnings.push(`removed claim(s) the brand kit / platform forbids from the copy (never drawn): ${removedClaims.map((c) => `"${c}"`).join(', ')}`) }
   if (logo) {
-    const icon = await logoIconCheck(Buffer.from(logo.slice(logo.indexOf(',') + 1), 'base64'), kit?.logoUrl)
+    const icon = await logoIconCheck(Buffer.from(logo.slice(logo.indexOf(',') + 1), 'base64'), logoUrlUsed)
     if (icon.looksLikeIcon) { qa.logoLooksLikeIcon = true; qa.warnings.push(`the kit logo looks like a favicon / app icon, not the wordmark (${icon.reason}): placed as it is — upload the real wordmark logo (qa.logoLooksLikeIcon)`) }
   }
   if (seamsFound.skipped?.length) { qa.seamBlendSkipped = true; qa.warnings.push(`seam blend skipped: ${seamsFound.skipped.map((k) => `${k.edge} strip next to detailed content`).join(', ')} — left as it is`) }
   if (report.cta.busy) { qa.ctaBusy = true; qa.warnings.push('the CTA button sits on a busy area / the product (compositeLayers.cta.busy)') }
-  qa.status = qa.safeZones === 'violation' || qa.textPresent === 'no' || qa.extraCtaRisk || Boolean(done.scenePrep.ctaOmitted) || layoutBad || report.text.textOverProduct || seamsRemaining > 0 ? 'fail' : qa.ctaBusy || report.text.scale < 0.8 ? 'warning' : 'pass'
+  qa.status = qa.safeZones === 'violation' || qa.textPresent === 'no' || qa.extraCtaRisk || Boolean(done.scenePrep.ctaBlocked) || layoutBad || report.text.textOverProduct || seamsRemaining > 0 ? 'fail' : qa.ctaBusy || report.text.scale < 0.8 ? 'warning' : 'pass'
   if (qa.status === 'pass' && qa.logoLooksLikeIcon) qa.status = 'warning'
   qa.severity = Math.round((qaSeverity({ ...qa, ctaButtons: Math.max(0, qa.ctaButtons - (report.cta.status === 'drawn' ? 1 : 0) + (qa.ctaButtons > 1 ? 1 : 0)) }) + (report.text.textOverProduct ? 4 : 0) + (seamsRemaining ? 3 * seamsRemaining : 0)) * 100) / 100
   const rough = await edgeRoughness(exact.placed).catch(() => null)
@@ -161,6 +165,7 @@ export async function generateExactWebStyleAd(input: {
   halo.reasons = reasons
   return {
     imageDataUrl: dataUrl,
+    rawSceneDataUrl: `data:image/png;base64,${Buffer.from(exact.png).toString('base64')}`,
     width: report.width,
     height: report.height,
     costUsd: exact.costUsd,

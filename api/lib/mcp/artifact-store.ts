@@ -59,6 +59,8 @@ export type McpArtifactStore = {
     metadata?: Record<string, unknown>
     actionType?: 'generate' | 'edit' | 'enhance'
   }) => Promise<{ messageId: string; productImageId: string; imageUrl: string }>
+  /** Round 9: storage-only upload of a raw generation (scene before compositing). No chat message / library row is created. Optional (test stores omit it). */
+  saveRawImage?: (options: { userId: string; offerId: string; imageDataUrl: string; tag: string }) => Promise<{ imageUrl: string }>
   saveImageFromPublicUrl: (options: {
     userId: string
     brandId: string
@@ -249,6 +251,15 @@ export function createMcpArtifactStore(): McpArtifactStore | null {
         .eq('id', options.sessionId)
 
       return { messageId: message.id as string, scriptId: script.id as string }
+    },
+
+    async saveRawImage(options) {
+      const jpeg = await jpegBytesForGeneratedUpload(options.imageDataUrl)
+      const tag = options.tag.replace(/[^a-z0-9-]/gi, '').slice(0, 24) || 'raw'
+      const path = `${options.userId}/${options.offerId}/mcp-raw/${tag}-${randomUUID()}.${jpeg.extension}`
+      const { error } = await db.storage.from('post-images').upload(path, jpeg.bytes, { contentType: jpeg.contentType, upsert: false })
+      if (error) throw error
+      return { imageUrl: db.storage.from('post-images').getPublicUrl(path).data.publicUrl }
     },
 
     async saveImageArtifact(options) {

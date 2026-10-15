@@ -125,14 +125,14 @@ describe('3. strips are cut off (crop-and-zoom) when the located objects survive
 })
 
 describe('2. the CTA never covers the located product / accessory', () => {
-  it('B (box + controller to the bottom edge): no pill slot is free → the button is NOT drawn over them, it is left out and reported; nothing else moves onto the product', async () => {
+  it('B (box + controller to the bottom edge): round 9 — the CTA is never dropped: the picture moves up (or the CTA stays ≥ 86 % on the least bad slot, flagged); nothing else moves onto the product', async () => {
     const out = await prepareAndLayout({ bytes: F8b('scene-B-r7.jpg'), ratio: '4:5', logo: LOGO, blocks: splitCopyBlocks(COPY_B, 'Escribinos por DM'), palette: PALETTE, fonts: { headingFont: null, bodyFont: null }, avoid: BOX_B })
     expect(out.scenePrep.roomBelow?.attempted).toBe(true)
-    expect(out.scenePrep.ctaOmitted).toBe(true)
-    expect(out.report.cta.status).toBe('none')
+    expect(out.report.cta.status).toBe('drawn')
+    expect(Boolean(out.scenePrep.ctaBlocked)).toBe(!out.scenePrep.roomBelow?.applied && !out.scenePrep.extended)
     expect(out.report.text.textOverProduct).toBe(false)
     expect(out.report.layout.overlaps).toEqual([])
-  })
+  }, 60_000)
   it('a narrower pill beside the controller is used before giving up (never the full-size one over it)', async () => {
     // product on the left 55 % down to the bottom band; the right 40 % is free
     const box = { x0: 0.08, y0: 0.45, x1: 0.56, y1: 0.9 }
@@ -153,11 +153,12 @@ describe('2. the CTA never covers the located product / accessory', () => {
       expect(overlapsBox(out.report.cta.box!, out.report.width, out.report.height, out.sceneAvoid[0])).toBe(false)
       expect(out.sceneAvoid[0].y1).toBeLessThan(0.93)
     } else {
-      expect(out.scenePrep.ctaOmitted).toBe(true)
+      expect(Boolean(out.scenePrep.ctaBlocked) || Boolean(out.scenePrep.extended)).toBe(true)
+      expect(out.report.cta.status).toBe('drawn')
     }
     const m = await sharp(out.sceneBytes).metadata()
     expect([m.width, m.height]).toEqual([800, 1000])
-  })
+  }, 60_000)
   it('shiftSceneUp: same size, the content really moved up by the shift, the vacated bottom is textured (not a flat block)', async () => {
     const src = await synth({})
     const up = await shiftSceneUp(src, 100)
@@ -174,15 +175,16 @@ describe('2. the CTA never covers the located product / accessory', () => {
 })
 
 describe('7. logo scrim below 4.5:1, 8. shipping line stays, 6. prompt strings', () => {
-  it('a logo over bright foliage (contrast < 4.5) gets a soft scrim and the report has both contrasts; over a calm dark wall it does not', async () => {
+  it('a logo over bright foliage (contrast < 4.5) gets a SOLID plate (round 9, no glow) and the report has both contrasts; over a calm dark wall it does not', async () => {
     const bright = await layoutOf(F8b('scene-A-r7.jpg'), COPY_A, [BOX_A])
     expect(bright.report.logo.status).toBe('drawn')
-    expect(bright.report.logo.scrim).toBeTruthy()
+    expect(bright.report.logo.plate).toBeTruthy()
+    expect(bright.report.logo.scrim).toBeUndefined()
     expect(bright.report.logo.contrastBefore).toBeLessThan(4.5)
     expect(bright.report.logo.contrast).toBeGreaterThanOrEqual(4.5)
     const dark = await sharp({ create: { width: 800, height: 1000, channels: 3, background: { r: 245, g: 241, b: 232 } } }).jpeg().toBuffer()
     const calm = await layoutOf(dark, COPY_A, [])
-    expect(calm.report.logo.scrim).toBeUndefined()
+    expect(calm.report.logo.plate).toBeUndefined()
   })
   it('facts: the shipping line is the one kept on the image (age / not-included notes rank last); a second line stays when it fits and goes to overflow when it does not', async () => {
     const long = ['Lo que llega a tu casa', '₡14.900 el kit con control', 'Desde 8 años con supervisión de un adulto', 'Envío gratis llevando 2 kits o más', 'Papel y 3 pilas AA no incluidos', 'Escribinos por DM'].join('\n')
@@ -274,7 +276,7 @@ describe('1 + 4. flow with mock xAI: no scale-in, qa counts the compositor only,
     const meta = await sharp(Buffer.from(out.generated.imageDataUrl.split(',')[1], 'base64')).metadata()
     expect(meta.width! / meta.height!).toBeCloseTo(0.8, 1)
   })
-  it('scene B: the box art is not a "view change" warning (no fidelity warning, no suggestedFallback exact); the CTA left out is a reported defect and stays in the caption; no scale-in', async () => {
+  it('scene B: the box art is not a "view change" warning (no fidelity warning, no suggestedFallback exact); the CTA is always drawn (blocked → flagged, severity 8); no scale-in', async () => {
     scenes = [F8b('scene-B-r7.jpg')]
     const out = await generateWebStyleImage({ ...base(F6('box.jpg'), [{ imageUrl: durl(F6('ctrl.png'), 'image/png'), label: 'control remoto' }]), productPhotoRole: 'box', ctx: ctx(), copy: COPY_B, enforceSafeZones: true, autoRetry: false })
     expect(out.safeZoneFix).toBeUndefined()
@@ -283,16 +285,15 @@ describe('1 + 4. flow with mock xAI: no scale-in, qa counts the compositor only,
     // the controller (dark, not locatable by feature match) is found by what is under the pill: the picture is moved up and the pill goes BESIDE the controller (right of it), never on it
     const cta = (out as unknown as { compositeLayers: { cta: { status: string; box?: { x: number; w: number } }; width: number } }).compositeLayers
     expect(out.generated.imageDataUrl.startsWith('data:image/jpeg')).toBe(true)
-    if (cta.cta.status === 'drawn') {
-      expect(cta.cta.box!.x / cta.width).toBeGreaterThanOrEqual(0.58) // right of the controller (x 0.32–0.58)
-      expect(out.qa.ctaButtons).toBe(1)
-      expect(out.qa.ctaBlocked).toBeUndefined()
-    } else {
-      expect(out.qa.ctaBlocked).toBe(true)
-      expect(out.qa.ctaButtons).toBe(0)
+    // round 9: the CTA is always drawn (≥ 86 % size); either beside the controller or flagged as blocked with the heavy severity factor
+    expect(cta.cta.status).toBe('drawn')
+    expect(out.qa.ctaButtons).toBe(1)
+    if (process.env.DUMP9) (await import('node:fs')).writeFileSync('/tmp/b9.jpg', Buffer.from(out.generated.imageDataUrl.split(',')[1], 'base64'))
+    if (!out.qa.ctaBlocked) expect(cta.cta.box!.x / cta.width).toBeGreaterThanOrEqual(0.55) // right of the controller (its body ends ≈ 0.55 after the upward shift)
+    else {
       expect(out.qa.status).toBe('fail')
-      expect(out.qa.warnings.join(' ')).toMatch(/CTA button was NOT drawn/)
-      expect(out.qa.severityFactors?.ctaBlocked).toBe(4)
+      expect(out.qa.warnings.join(' ')).toMatch(/CTA is never dropped/)
+      expect(out.qa.severityFactors?.ctaBlocked).toBe(8)
     }
     expect(out.caption).toMatch(/Escribinos por DM/)
   })

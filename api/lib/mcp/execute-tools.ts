@@ -25,6 +25,7 @@ import { generateWebStyleImage, offerLockFromRow, pickAccessoryPhotos, postCheck
 import type { McpOfferStore } from './offer-tools.js'
 import { resolveImageRatio } from '../image-ratios.js'
 import { createModelGateway } from '../adpack/gateway.js'
+import { isPackProduct } from './product-kind.js'
 import { parseImageFidelityArgs, photosFromUrls, resolveToolProductFidelity } from '../adpack/fidelity/pipeline.js'
 import { normalizeImageReferenceRole } from '../image-prompt-context.js'
 import { buildImageEditSystemPrompt, resolveGrokAspectRatio, runGrokImageEdit } from '../grok-image-edit.js'
@@ -887,10 +888,16 @@ async function runImageGenerateBody(options: {
   // exact mode composites real pixels of every selected photo, so it keeps the unsplit product list.
   const exactProductUrls = partitionOwnedImageRefs({ images: ownedRefs, productImageId: options.productImageId }).productUrls
 
-  const fidelityMode = resolveToolProductFidelity(options.productFidelity, productUrls.length > 0)
+  // Round 9: a printed pouch / pack defaults to the real-pixel path (Grok misspells its printing); the hero must be the pack itself, not a box / part photo.
+  const offerForKind = options.ctxPreview.offers.find((o) => o.id === options.offerId)
+  const heroRoleForKind = (() => { const sku = ownedRefs.find((i) => i.id === options.productImageId?.trim()); return sku ? (roleFromImageRow({ tags: sku.tags, is_primary: sku.isPrimary }) ?? roleFromLabel(sku.label)) : undefined })()
+  const packDefault = isPackProduct([offerForKind?.name, offerForKind?.type, offerForKind?.productDescription, offerForKind?.technicalSpecs, options.productNotes]) && !(heroRoleForKind && ['box', 'contents', 'part'].includes(heroRoleForKind))
+  const fidelityMode = resolveToolProductFidelity(options.productFidelity, productUrls.length > 0, { defaultExact: packDefault })
+  const fidelityDefaultNote = !options.productFidelity && fidelityMode === 'exact' ? 'productFidelity defaulted to "exact" for a printed pack / pouch (real product pixels, the printing is never redrawn); pass productFidelity:"generated" to let the model redraw it' : undefined
   let fidelity: Record<string, unknown> | null = null
   let promptUsed = prompt
   let postCheck: Record<string, unknown> | null = null
+  let rawSceneDataUrl: string | undefined
   let generated: { imageDataUrl: string; providerModel: string; estimatedCostUsd: number; resolution: string; quality: string; aspectRatio: string; mode: string; lockApplied: boolean }
   if (fidelityMode === 'exact') {
     // Real product pixels on a generated plate (A1), then the SAME ad layers as the web-style flow: copy / one CTA / logo /
@@ -920,6 +927,7 @@ async function runImageGenerateBody(options: {
       layoutCap: options.layoutCap,
     })
     fidelity = exactAd.fidelity
+    rawSceneDataUrl = exactAd.rawSceneDataUrl
     generated = {
       imageDataUrl: exactAd.imageDataUrl,
       providerModel: exactAd.plateModel || 'grok-imagine',
@@ -978,6 +986,14 @@ async function runImageGenerateBody(options: {
       lockText: '',
       max: 3,
     }).map((a) => ({ imageUrl: a.imageUrl, label: a.label }))
+    const heroSku = ownedRefs.find((i) => i.id === options.productImageId?.trim()) ?? accessoryRefs.rest.find((i) => i.kind !== 'context' && i.kind !== 'generated')
+    const heroRole = heroSku ? (roleFromImageRow({ tags: heroSku.tags, is_primary: heroSku.isPrimary }) ?? roleFromLabel(heroSku.label)) : undefined
+    // Round 9: the selected photo is a box / contents / part (e.g. the controller): the offer's MAIN product must not show up — its real photo joins the
+    // "unlisted objects" feature-match check, so a duplicate / extra product in the scene is flagged.
+    if (heroRole && ['box', 'contents', 'part'].includes(heroRole)) {
+      const main = allProductAssets.find((a) => a.imageUrl && a.id !== heroSku?.id && (a.isPrimary || roleFromImageRow({ tags: a.tags, is_primary: a.isPrimary }) === 'hero') && a.kind !== 'generated' && a.kind !== 'context')
+      if (main) libraryPhotos.unshift({ imageUrl: main.imageUrl, label: `producto principal (${main.label || 'foto principal'})` })
+    }
     const web = await generateWebStyleImage({
       apiKey: xaiKey(),
       ctx: options.ctxPreview,
@@ -991,7 +1007,8 @@ async function runImageGenerateBody(options: {
       textDensity: options.textDensity,
       ctaStrength: options.ctaStrength,
       productUrls,
-      productPhotoRole: (() => { const sku = ownedRefs.find((i) => i.id === options.productImageId?.trim()) ?? accessoryRefs.rest.find((i) => i.kind !== 'context' && i.kind !== 'generated'); return sku ? (roleFromImageRow({ tags: sku.tags, is_primary: sku.isPrimary }) ?? roleFromLabel(sku.label)) : undefined })(),
+      productPhotoRole: heroRole,
+      productPhotoLabel: heroSku?.label ?? undefined,
       supportUrls,
       referenceMode: options.referenceMode,
       lock,
@@ -1006,6 +1023,8 @@ async function runImageGenerateBody(options: {
     generated = web.generated
     promptUsed = web.prompt
     postCheck = postCheckSummary(web)
+    if (web.lockScope) postCheck = { ...postCheck, lockScope: web.lockScope }
+    rawSceneDataUrl = web.rawScene?.imageDataUrl
   }
 
   const persistStarted = Date.now()
@@ -1034,6 +1053,13 @@ async function runImageGenerateBody(options: {
       ...(postCheck?.fidelity_warning ? { fidelity_warning: postCheck.fidelity_warning } : {}),
     },
   })
+  // Round 9: always keep the raw generation (scene before compositing) next to the final; best-effort, never fails the job.
+  let raw: { sceneUrl?: string; finalUrl: string; note?: string } = { finalUrl: saved.imageUrl }
+  if (rawSceneDataUrl?.startsWith('data:') && options.artifactStore.saveRawImage) {
+    raw = await options.artifactStore.saveRawImage({ userId: options.user.id, offerId: options.offerId, imageDataUrl: rawSceneDataUrl, tag: 'scene' })
+      .then((r) => ({ sceneUrl: r.imageUrl, finalUrl: saved.imageUrl }))
+      .catch((err) => ({ finalUrl: saved.imageUrl, note: `raw scene not stored: ${err instanceof Error ? err.message.slice(0, 80) : 'error'}` }))
+  } else if (rawSceneDataUrl) raw.note = 'raw scene not stored (store has no raw upload)'
 
   await logApiUsage({
     userId: options.user.id,
@@ -1094,8 +1120,10 @@ async function runImageGenerateBody(options: {
     lockApplied: generated.lockApplied,
     estimatedCostUsd: generated.estimatedCostUsd,
     productFidelity: fidelityMode,
+    ...(fidelityDefaultNote ? { productFidelityNote: fidelityDefaultNote } : {}),
     ...(fidelity ? { fidelity } : {}),
     ...(postCheck || {}),
+    raw,
     prompt: promptUsed,
     deepLink: `${origin}/chat?brand=${encodeURIComponent(options.brandId)}&session=${encodeURIComponent(sessionId)}`,
     note: 'Image saved to Advance library as high-quality JPEG (HTTPS URL only — no blob in job result). Open deepLink to view in chat.',
