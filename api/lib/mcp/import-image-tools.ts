@@ -27,7 +27,7 @@ import { MIGRATION_085 } from '../db-missing-column.js'
 import { parseStyleDnas, upsertStyleDnaList } from '../bulk/style-dna.js'
 import type { StyleDna } from '../bulk/types.js'
 import { safeFilename, uploadPath } from './asset-rehost.js'
-import { LABEL_MAX } from './text-limits.js'
+import { LABEL_MAX, clipWithNotice, ROLE_DB_MAX } from './text-limits.js'
 import { downloadRemoteImage, RemoteImageError, type RemoteFetch } from './remote-image.js'
 import { LOGO_VARIANTS, UPLOAD_LIMITS, saveKitAsset } from './upload-tools.js'
 import type { McpBrandKitStore } from './brand-kit-tools.js'
@@ -171,7 +171,8 @@ export async function mcpImportImage(deps: ImportDeps & { args: Row }): Promise<
       row.source_url = url
       if (quality) row.quality = quality
       if (isProduct && role) row.tags = [ROLE_TAG[role]]
-      if (isProduct && label) row.role = label
+      // Round 11: DB role column is ≤ 60 (product_images_role_len); the full label stays in label
+      if (isProduct && label) row.role = clipWithNotice('role', label, ROLE_DB_MAX, [])
     }
     if (setPrimary && caps.imageMeta) await store.clearPrimaryImages({ userId: user.id, offerId })
     if (setPrimary && caps.imageMeta) row.is_primary = true

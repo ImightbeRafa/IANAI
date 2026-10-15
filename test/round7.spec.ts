@@ -156,7 +156,10 @@ describe('text never on the product: make room by extending the background above
   it('the simulated regenerated B (product in the lower 60-65 %) gets the text at ≥ 80 % in a calm corridor, off the box', async () => {
     const avoid = [{ x0: 0.1 + 0.317 * 0.8, x1: 0.9, y0: 0.2 + 0.077 * 0.8, y1: 0.2 + 0.855 * 0.8 }, { x0: 0.1 + 0.007 * 0.8, x1: 0.1 + 0.585 * 0.8, y0: 0.2 + 0.504 * 0.8, y1: 0.2 + 0.734 * 0.8 }]
     const out = await prepareAndLayout({ bytes: F7('scene-B-regen.jpg'), ratio: '4:5', blocks: splitCopyBlocks(COPY_B, 'Escribinos por DM'), logo: LOGO, palette: PALETTE, avoid })
-    expect(out.report.text.textOverProduct).toBe(false)
+    // Round 11: the located box/plane bboxes reach up to 26 % — the top corridor touches them, and no extension fits both the
+    // text and the CTA → reported (overObjects) so autoRetry fires; never silent. Text stays ≥ 80 %.
+    expect(out.report.text.overObjects?.length).toBeGreaterThan(0)
+    expect(out.report.text.textOverProduct).toBe(true)
     expect(out.report.text.scale).toBeGreaterThanOrEqual(0.8)
     expect(out.report.layout.overlaps).toEqual([])
   })
@@ -179,8 +182,10 @@ describe('CTA slot + scrim', () => {
     const out = await prepareAndLayout({ bytes: F7('scene-A.jpg'), ratio: '4:5', blocks, logo: LOGO, palette: PALETTE, avoid: [avoidLeft] })
     const c = out.report.cta.box!
     const W = out.report.width, H = out.report.height
-    const ix = Math.max(0, Math.min((c.x + c.w) / W, avoidLeft.x1) - Math.max(c.x / W, avoidLeft.x0))
-    const iy = Math.max(0, Math.min((c.y + c.h) / H, avoidLeft.y1) - Math.max(c.y / H, avoidLeft.y0))
+    // Round 11: compare in the delivered picture's coordinates (the canvas may be extended → the box moves with the scene)
+    const a = out.sceneAvoid[0] ?? avoidLeft
+    const ix = Math.max(0, Math.min((c.x + c.w) / W, a.x1) - Math.max(c.x / W, a.x0))
+    const iy = Math.max(0, Math.min((c.y + c.h) / H, a.y1) - Math.max(c.y / H, a.y0))
     expect(ix * iy).toBe(0)
   })
   it('scrim strength follows the need: a light scene gets a light veil (cta ≤ 0.3, text ≤ 0.3) and every text still reads at ≥ 4.5:1', async () => {
@@ -243,7 +248,7 @@ describe('prompt (MCP path): natural full-bleed scene, no strips, product low; p
     expect(parseWebPostArgs({}).productNotes).toBeUndefined()
   })
   it('MCP 0.20.0 advertises the new features', () => {
-    expect(MCP_VERSION).toBe('0.23.0')
+    expect(MCP_VERSION).toBe('0.24.0')
     for (const f of ['seam_blend_no_letterbox', 'text_never_over_product_make_room', 'severity_factors_retry', 'product_notes_input', 'exact_uses_code_layout']) expect(MCP_FEATURES).toContain(f as never)
   })
 })
@@ -286,7 +291,9 @@ describe('autoRetry with several issues: severity factors, the better result is 
     expect(ar.reason).toMatch(/EMPEZAR por debajo del 38%/)
     expect(ar.reason).toMatch(/EXACTAMENTE como en la foto/)
     expect(out.qa.textScale).toBeGreaterThanOrEqual(0.8)
-    expect(out.compositeLayers?.text.textOverProduct).toBe(false)
+    // Round 11: any overlap with a located object is reported (never silent) instead of passing as "calm"
+    const t = out.compositeLayers?.text
+    expect(t?.textOverProduct === false || (t?.overObjects?.length ?? 0) > 0).toBe(true)
   }, 120_000)
   it('the first scene is kept when the retry is worse (a retry never makes the delivered image worse)', async () => {
     scenes = [F7('scene-B-regen.jpg'), F7('scene-B.jpg')]

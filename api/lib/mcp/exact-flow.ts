@@ -170,7 +170,7 @@ export async function generateExactWebStyleAd(input: {
     height: report.height,
     costUsd: exact.costUsd,
     plateModel: exact.plateModel,
-    fidelity: { score: exact.fidelity.score, passed: exact.fidelity.passed, method: exact.fidelity.method, ssim: exact.fidelity.ssim, deltaE: exact.fidelity.deltaE, silhouetteIoU: exact.score.silhouetteIoU, hueShift: exact.score.hueShift },
+    fidelity: { score: exact.fidelity.score, passed: exact.fidelity.passed, method: exact.fidelity.method, ssim: exact.fidelity.ssim, deltaE: exact.fidelity.deltaE, silhouetteIoU: typeof exact.cutout.photoIoU === 'number' ? exact.cutout.photoIoU : exact.score.silhouetteIoU, silhouetteVs: typeof exact.cutout.photoIoU === 'number' ? 'photo' : 'cutout', cutoutIoU: exact.score.silhouetteIoU, ...(exact.cutout.maskRepaired ? { maskRepaired: true } : {}), hueShift: exact.score.hueShift },
     qa,
     halo,
     ...(halo.flagged ? { halo_warning: { code: 'halo_warning' as const, reason: `visible halo / leftover background around the real product: ${reasons.join('; ')}`, leak: halo.leak, haze: halo.haze, edgeRoughness: rough } } : {}),

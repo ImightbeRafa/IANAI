@@ -218,5 +218,5 @@ describe('2 + 6. flow with mock xAI: scoped lock reaches the prompt, raw scene i
 })
 
 describe('version', () => {
-  it('MCP 0.23.0', () => expect(MCP_VERSION).toBe('0.23.0'))
+  it('MCP 0.24.0', () => expect(MCP_VERSION).toBe('0.24.0'))
 })

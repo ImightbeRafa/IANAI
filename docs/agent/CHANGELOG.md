@@ -1,3 +1,17 @@
+## 2026-10-14 — MCP 0.24.0: text never over any object, cutout mask coverage + fidelity vs the photo, clear sheet kept, no double logo plate, low fidelity → retry → exact, quote binds the resolved productFidelity, cross-offer asset reuse, role ≤ 60, pack OCR tiles
+
+**Area:** api (mcp, adpack), docs — no migration, no new env/secret/binding/route/cron, no new npm dependency, no Dockerfile change
+**Files:** `api/lib/adpack/fidelity/{mask-coverage (new),sheet-film (new),segment,pipeline,harmonize}.ts`, `api/lib/adpack/types.ts`, `api/lib/bulk/{run-bulk,types}.ts`, `api/lib/mcp/{layout-ad,compose-scene,composite-ad,exact-flow,web-image,execute-tools,pack-ocr,text-limits,upload-tools,import-image-tools,offer-tools,protocol,tool-registry,server-info}.ts`, tests `test/round11.spec.ts` (new) + `test/fixtures/round11/`, version strings in 13 specs, timeouts in `test/round8.spec.ts` / `test/round10.spec.ts`, expectations in `test/round7.spec.ts`
+
+- **Text never over any object (`layout-ad`):** overlap with ANY located box (product, lamp, box…) or an object-busy cell counts (`report.text.overObjects`, folded into `textOverProduct`). A clear placement is searched first (width factors 1 / .86 / .74 / .62); the canvas extension now also tries text-first anchors (0.82 / 0.78 / 0.72) and can start from the pre-CTA-shift scene. If nothing fits it is flagged → autoRetry.
+- **Cutout mask coverage (`mask-coverage`, `segment`):** flood masks are checked against a quadratic Lab backdrop model; > 4 % of the product missed (PH white pouch top) → repaired (closing + span fill) or the strategy fails. A flood mask covering > 55 % of the frame with IoU < 0.7 vs the photo silhouette is rejected as a leak. Cutout cache `seg3`.
+- **Fidelity vs the reference PHOTO:** `fidelity.silhouetteIoU` = mask vs the photo's own silhouette (`photoIoU`, warning < 0.9), plus `cutoutIoU` / `maskRepaired`.
+- **Clear sheet kept (`sheet-film`):** ≥ 4 similar pieces with narrow gaps keep their carrier film (alpha 0.24, rim 0.5). Night scenes: exposure floor 0.66.
+- **Logo:** a self-plated logo asset is not trimmed and gets no second plate (`report.logo.selfPlated`); the logo prefers the centre slot.
+- **Low fidelity (`web-image`, `execute-tools`):** a confident (feature-located) fidelity < 0.7 forces the single retry (`forcedBy:"fidelity"`, `autoRetry:false` opts out); still < 0.7 → `fidelityFallback` → exact path.
+- **execute tools:** the quote binds the resolved `productFidelity`; a product image of another offer of the same brand can be reused (tenant-checked); role clipped to 60 (DB `product_images_role_len`) with a notice.
+- **Pack OCR:** whole image + 2×3 tiles (small print); tile-only near-misses are demoted. SP r9 "ingecdicates" fails.
+
 ## 2026-10-14 — MCP 0.23.0: no-mirror continuation, shrink the picture before the text (≥ 85 %), clean CTA slots only, pack OCR retry → exact, wood grain not a prop, explicit "generated" pack warning
 
 **Area:** api (mcp), docs — no migration, no new env/secret/binding/route/cron, no new npm dependency, no Dockerfile change (tesseract already in the 0.22.0 runtime image)

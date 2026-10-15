@@ -25,6 +25,8 @@ import sharp from 'sharp'
 import type { ModelGateway, ProductPhotoRole, SegmentationItem } from '../types.js'
 import { borderBackground, bordersTouched, components, deltaE, dilate, erode, labImage } from './pixels.js'
 import { BACKGROUND_LEAK_MAX, backgroundLeakShare } from './score.js'
+import { sheetFilm } from './sheet-film.js'
+import { checkMaskCoverage, LEAK_FRAME_SHARE, MASK_MISSED_MAX, PHOTO_IOU_REJECT, photoSilhouetteIoU, type MaskCoverage } from './mask-coverage.js'
 import { addMissedObjects, cutoutRecall, estimateForeground, isFlatLayEstimate, MIN_CUTOUT_RECALL, type CutoutRecall, type ForegroundEstimate } from './recall.js'
 
 export type CutoutMethod = 'alpha' | 'flood' | 'model'
@@ -47,6 +49,12 @@ export interface CutoutOk {
   flatLay?: boolean
   /** Share of the cut-out that is still the source photo's backdrop / its shadow (round 1, P2). */
   backgroundLeak?: number
+  /** Round 11: share of the product the first mask missed (light-on-light) and whether it was repaired. */
+  maskCoverage?: { missedShare: number; bboxCoverage: number; repaired: boolean }
+  /** Round 11: the clear carrier sheet of a patch grid kept as a translucent film (pieces, film box in source fractions). */
+  sheetFilm?: { pieces: number; box: { x0: number; y0: number; x1: number; y1: number } }
+  /** Round 11: delivered mask vs an independent silhouette of the product in the source photo (IoU). */
+  photoIoU?: number
 }
 
 export interface CutoutFailed {
@@ -146,16 +154,22 @@ function fillSmallHoles(mask: Uint8Array, w: number, h: number): Uint8Array {
 }
 
 /** Full-resolution RGBA cut-out from a work-resolution mask: upscale + feather + decontaminate + trim. */
-async function buildCutout(full: Raw, mask: Uint8Array, mw: number, mh: number, bgRgb: [number, number, number] | null): Promise<{ png: Buffer; width: number; height: number }> {
+async function buildCutout(full: Raw, mask: Uint8Array, mw: number, mh: number, bgRgb: [number, number, number] | null, film?: Uint8Array | null): Promise<{ png: Buffer; width: number; height: number }> {
   const maskPng = await sharp(Buffer.from(mask.map((v) => (v ? 255 : 0))), { raw: { width: mw, height: mh, channels: 1 } })
     .resize(full.w, full.h, { kernel: 'linear', fit: 'fill' })
     .blur(Math.max(0.5, Math.min(1.6, full.w / 1400)))
     .extractChannel(0)
     .raw()
     .toBuffer()
+  // Round 11: the clear carrier sheet of a patch grid stays as a translucent film (sheet-film.ts)
+  const filmPng = film ? await sharp(Buffer.from(film), { raw: { width: mw, height: mh, channels: 1 } }).resize(full.w, full.h, { kernel: 'linear', fit: 'fill' }).extractChannel(0).raw().toBuffer() : null
   const out = Buffer.alloc(full.w * full.h * 4)
   for (let i = 0; i < full.w * full.h; i++) {
     let a = maskPng[i]
+    if (filmPng && filmPng[i] > a) {
+      out[i * 4] = full.data[i * full.channels]; out[i * 4 + 1] = full.data[i * full.channels + 1]; out[i * 4 + 2] = full.data[i * full.channels + 2]; out[i * 4 + 3] = filmPng[i]
+      continue
+    }
     // Hard-edge cleanup: near-zero → 0, near-full → 255 (keeps the interior pixels exact).
     if (a < 10) a = 0
     else if (a > 245) a = 255
@@ -469,8 +483,9 @@ async function tryFlood(bytes: Uint8Array, maxSide: number, opts: FloodOptions, 
   for (let i = 0; i < n; i++) bgMask[i] = fg[i] ? 0 : 1
   const bgRgb = labToRgbApprox(work, bgMask)
   const full = await rawRgba(bytes, maxSide)
-  const cut = await buildCutout(full, fg, work.w, work.h, bgRgb)
-  return { cut: { ok: true, ...cut, method: 'flood', coverage: area / n, sourceHash: '', rejected: [], ...(opts.allowMulti ? {} : { backgroundLeak: leak }) }, mask: fg }
+  const film = opts.allowMulti ? sheetFilm(fg, work.w, work.h) : null
+  const cut = await buildCutout(full, fg, work.w, work.h, bgRgb, film?.alpha)
+  return { cut: { ok: true, ...cut, method: 'flood', coverage: area / n, sourceHash: '', rejected: [], ...(opts.allowMulti ? {} : { backgroundLeak: leak }), ...(film ? { sheetFilm: { pieces: film.pieces, box: film.box } } : {}) }, mask: fg }
 }
 
 // ---------------------------------------------------------------------------
@@ -605,7 +620,42 @@ export async function segmentProduct(input: SegmentProductInput): Promise<Cutout
       if (!incomplete || recall.recall > incomplete.recall.recall) incomplete = { recall, method }
       continue
     }
-    return { ...res.cut, sourceHash, rejected, ...(recall ? { recall } : {}), ...(flatLay ? { flatLay: true } : {}) }
+    // Round 11: the mask must cover the whole product — a light part on a light backdrop (PH white pouch top) is
+    // not backdrop. Repair it (mask ∪ missed region) or fail the strategy; never deliver half a product.
+    let cut = res.cut
+    let coverage: MaskCoverage | undefined
+    if (!flatLay && method === 'flood' && wi && res.mask.length === wi.raw.w * wi.raw.h) {
+      coverage = checkMaskCoverage(wi.lab, wi.raw.w, wi.raw.h, res.mask)
+      if (coverage.missedShare > MASK_MISSED_MAX) {
+        const fixed = coverage.repaired ? checkMaskCoverage(wi.lab, wi.raw.w, wi.raw.h, coverage.repaired) : null
+        if (coverage.repaired && fixed && fixed.missedShare <= MASK_MISSED_MAX) {
+          const bgMask = new Uint8Array(coverage.repaired.length)
+          for (let i = 0; i < bgMask.length; i++) bgMask[i] = coverage.repaired[i] ? 0 : 1
+          const rebuilt = await buildCutout(await rawRgba(bytes, maxSide), coverage.repaired, wi.raw.w, wi.raw.h, labToRgbApprox(wi.raw, bgMask))
+          let a = 0
+          for (const v of coverage.repaired) a += v
+          cut = { ...cut, ...rebuilt, coverage: a / coverage.repaired.length }
+          rejected.push(`${name}: mask missed ${Math.round(coverage.missedShare * 100)}% of the product (light part on a light backdrop) → repaired`)
+        } else {
+          rejected.push(`${name}: mask misses ${Math.round(coverage.missedShare * 100)}% of the product (bbox coverage ${coverage.bboxCoverage})`)
+          const r = recall ?? { recall: Math.max(0, 1 - coverage.missedShare), areaRecall: Math.max(0, 1 - coverage.missedShare), componentRecall: 1, colorCoverage: 1, components: { source: 1, kept: 1 } }
+          if (!incomplete || r.recall > incomplete.recall.recall) incomplete = { recall: { ...r, recall: Math.min(r.recall, Math.max(0, 1 - coverage.missedShare)) }, method }
+          continue
+        }
+      }
+    }
+    const finalMask = cut !== res.cut && coverage?.repaired ? coverage.repaired : res.mask
+    const photoIoU = !flatLay && wi && finalMask.length === wi.raw.w * wi.raw.h ? photoSilhouetteIoU(wi.lab, wi.raw.w, wi.raw.h, finalMask) : null
+    let maskShare = 0
+    for (const v of finalMask) maskShare += v ? 1 : 0
+    maskShare /= Math.max(1, finalMask.length)
+    // only a mask that grabbed most of the frame AND disagrees with the photo silhouette (open frames / soft shadows keep their holes → low IoU, small area)
+    if (coverage && typeof photoIoU === 'number' && photoIoU < PHOTO_IOU_REJECT && maskShare > LEAK_FRAME_SHARE) {
+      // Round 11: the flood leaked into the backdrop (strict flood on a downscaled photo grabbed most of the frame): try the next strategy.
+      rejected.push(`${name}: mask leaks into the backdrop (IoU vs the photo silhouette ${photoIoU} < ${PHOTO_IOU_REJECT}, mask covers ${Math.round(maskShare * 100)}% of the frame)`)
+      continue
+    }
+    return { ...cut, sourceHash, rejected, ...(recall ? { recall } : {}), ...(flatLay ? { flatLay: true } : {}), ...(coverage ? { maskCoverage: { missedShare: coverage.missedShare, bboxCoverage: coverage.bboxCoverage, repaired: cut !== res.cut } } : {}), ...(typeof photoIoU === 'number' ? { photoIoU } : {}) }
   }
   if (incomplete) {
     return { ok: false, reason: 'cutout_incomplete', detail: rejected.join('; ').slice(0, 400), sourceHash, rejected, recall: incomplete.recall }

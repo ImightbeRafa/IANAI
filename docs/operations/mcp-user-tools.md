@@ -37,6 +37,17 @@ Enabled tools now:
 
 **Offers + photos (sync write, no credits, 0.11):** `create_offer`, `update_offer`, `set_primary_product_image`, `tag_product_image`, `create_upload_url` → PUT → `finalize_upload`.
 
+### 0.24.0 — text never over any object, cutout mask coverage, fidelity vs the photo, clear sheet kept, low fidelity → exact
+
+Registry / server version **0.24.0**. **No migration**, no new env/secret/binding/route/cron, no new npm dependency. Proofs: `test/round11.spec.ts`, `test/round7.spec.ts`, `test/web-mcp-parity.spec.ts` (web request unchanged).
+
+- Text is never placed over a located object (product or scene prop); picture shrink / shift first, otherwise `qa` flags it and autoRetry fires. Text ≥ 85 %.
+- Exact path: the cutout mask must cover the whole product (repair or fail); fidelity is measured against the reference photo (`photoIoU`).
+- Patch grids keep their clear sheet; contact shadow + light matching unchanged; a self-plated logo gets no second plate.
+- `execute_image_generate`: generated fidelity < 0.7 (feature-located) → one retry → exact fallback; the quote reports and binds the resolved `productFidelity`.
+- Reference images may come from another offer of the same brand (same user + brand). `role` is clipped to 60 chars with a `truncated` notice.
+- Pack OCR also reads tiles (small print).
+
 ### 0.23.0 — no-mirror continuation, picture shrinks before the text, clean CTA slots only, pack OCR retry → exact, wood grain not a prop
 
 Registry / server version **0.23.0**. **No migration**, no new env/secret/binding/route/cron, no new npm dependency, no Dockerfile change. Proofs: `test/round10.spec.ts` (the REAL round-9 raw scenes of B / SP / PH, round-8 live PH crop), `test/web-mcp-parity.spec.ts` (web request unchanged).
@@ -277,7 +288,7 @@ Authorize always redirects to the Supabase **Site URL** (`https://advanceai.stud
 
 ## Code map
 - Host: `api/mcp.ts`, `api/lib/mcp/protocol.ts`
-- Registry: `api/lib/mcp/tool-registry.ts` (0.23.0)
+- Registry: `api/lib/mcp/tool-registry.ts` (0.24.0)
 - Offers / photos / uploads: `api/lib/mcp/offer-tools.ts`, `api/lib/mcp/upload-tools.ts`, `api/lib/mcp/asset-rehost.ts`, `api/lib/adpack/offer-profile.ts`, `api/lib/brand-profile.ts`, `api/lib/placeholder-guard.ts`, `api/lib/product-image-order.ts`, migration `085`
 - Brand kits: `api/lib/mcp/brand-kit-tools.ts`, `api/lib/brand-kit-resolve.ts`, migration `081`
 - Audit: `api/lib/mcp/tool-audit.ts`; MCP caps: `api/lib/mcp/limits.ts`

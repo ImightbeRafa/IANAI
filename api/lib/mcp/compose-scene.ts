@@ -11,6 +11,8 @@ import { blendSeams, cropZoomSeams, detectSeams, extendCanvas, EXTEND_LAST_RESOR
 export const TEXT_SCALE_OK = 0.8
 /** Round 10: the text is never accepted below 85 % of its nominal size when the scene can be moved / shrunk instead (round 9 B came out at 64 %). */
 export const TEXT_MIN = 0.85
+/** Round 11: smallest picture for TEXT that would otherwise sit on an object (room mostly above): a smaller picture beats a headline on the product. */
+export const EXTEND_TEXT_LAST = 0.72
 
 export type ScenePrepReport = {
   seams: { checked: boolean; found: Seam[]; blended?: boolean; remaining?: number; /** Strips NOT blended because the neighbouring content is detailed. */ skipped?: Array<{ edge: 'top' | 'bottom'; detail: number }>; /** Round 8: the strips were cut off and the picture zoomed back (no blend). */ cropZoom?: CropZoomReport; note?: string }
@@ -109,6 +111,9 @@ export async function prepareAndLayout(input: Omit<LayoutInput, 'avoid' | 'block
     }
     scenePrep.room = info
   }
+  // Round 11: the scene before the CTA up-shift — when the text is still on an object afterwards, the canvas extension also starts from here (round 10 B:
+  // the 10 % up-shift for the CTA pushed the kit box into the headline and no extension of the shifted scene could free it).
+  const preCta = { bytes: sceneBytes, avoid: sceneAvoid }
   // Round 8: the CTA has no free slot (every one overlaps the located product / accessory): move the picture UP and extend the bottom instead of covering the product.
   if (input.makeRoom !== false && done.report.cta.status === 'drawn' && done.report.cta.blocked) {
     const r1 = done.report
@@ -158,29 +163,32 @@ export async function prepareAndLayout(input: Omit<LayoutInput, 'avoid' | 'block
     const reason: 'cta' | 'text' | 'cta+text' = ctaBad(r2) && textBad(r2) ? 'cta+text' : ctaBad(r2) ? 'cta' : 'text'
     const anchors = reason === 'text' ? [0.75, 0.5, 0.25] : [0.25, 0.5, 0.75]
     const ctaRowY = r2.cta.status === 'drawn' && r2.cta.box ? (r2.cta.box.y - r2.height * 0.01) / r2.height : null
-    let pick: { d: Awaited<ReturnType<typeof layoutAdLayers>>; bytes: Buffer; avoid: NBox[]; scale: number; anchorY: number } | null = null
+    let pick: { d: Awaited<ReturnType<typeof layoutAdLayers>>; bytes: Buffer; avoid: NBox[]; scale: number; anchorY: number; undoUp?: boolean } | null = null
+    // Round 11: text on an object / under 85 % also goes down to 82 / 78 % (room above) — the picture shrinks before the text does or lands on anything.
     // 94 / 90 / 86 % first; a CTA still blocked by a product that stands on the bottom edge (round 9 SP pouch to 95 %) may go to 82 / 78 % with the room
     // mostly below (last resort before the blocked flag: a smaller product beats a CTA on the product)
     const a2 = anchors.slice(0, 2)
-    const plan: Array<[number, number[]]> = [[0.94, a2], [0.9, a2], [0.86, anchors], ...(reason !== 'text' ? ([[0.82, [0.25]], [EXTEND_LAST_RESORT, [0.1, 0.25]]] as Array<[number, number[]]>) : [])]
-    search: for (const [scale, anchorList] of plan) {
+    const plan: Array<[number, number[]]> = [[0.94, a2], [0.9, a2], [0.86, anchors], ...(reason !== 'text' ? ([[0.82, [0.25]], [EXTEND_LAST_RESORT, [0.1, 0.25]]] as Array<[number, number[]]>) : ([[0.82, [0.75, 0.6, 0.5]], [EXTEND_LAST_RESORT, [0.75, 0.6, 0.85]], [EXTEND_TEXT_LAST, [0.85, 0.75, 0.6]]] as Array<[number, number[]]>))]
+    const bases = [{ bytes: sceneBytes, avoid: sceneAvoid, undoUp: false }, ...(textBad(r2) && scenePrep.roomBelow?.applied ? [{ bytes: preCta.bytes, avoid: preCta.avoid, undoUp: true }] : [])]
+    search: for (const [scale, anchorList] of plan) for (const base of bases) {
       for (const anchorY of anchorList) {
         // cheap geometric pre-check: with the CTA blocked, the mapped located boxes must leave the CTA row (bottom ~18 %) free somewhere, else skip the render
         if (reason !== 'text' && ctaRowY != null) {
-          const mapped = sceneAvoid.map((b) => ({ x0: 0.5 + (b.x0 - 0.5) * scale, x1: 0.5 + (b.x1 - 0.5) * scale, y0: (1 - scale) * anchorY + b.y0 * scale, y1: (1 - scale) * anchorY + b.y1 * scale }))
+          const mapped = base.avoid.map((b) => ({ x0: 0.5 + (b.x0 - 0.5) * scale, x1: 0.5 + (b.x1 - 0.5) * scale, y0: (1 - scale) * anchorY + b.y0 * scale, y1: (1 - scale) * anchorY + b.y1 * scale }))
           const inRow = mapped.filter((b) => b.y1 > ctaRowY)
           const covered = inRow.reduce((a, b) => a + Math.max(0, Math.min(1, b.x1) - Math.max(0, b.x0)), 0)
           if (covered > 0.8) continue
         }
-        const ext = await extendCanvas(sceneBytes, scale, anchorY, 93, sceneAvoid)
-        const extAvoid = sceneAvoid.map(ext.map)
+        const ext = await extendCanvas(base.bytes, scale, anchorY, 93, base.avoid)
+        const extAvoid = base.avoid.map(ext.map)
         const d4 = await layoutAdLayers({ ...input, blocks: blocksCur, bytes: ext.bytes, avoid: extAvoid, probe: true })
-        if (!ctaBad(d4.report) && !textBad(d4.report) && (d4.report.cta.status === 'drawn' || r2.cta.status !== 'drawn')) { pick = { d: d4, bytes: ext.bytes, avoid: extAvoid, scale, anchorY }; break search }
+        if (!ctaBad(d4.report) && !textBad(d4.report) && (d4.report.cta.status === 'drawn' || r2.cta.status !== 'drawn')) { pick = { d: d4, bytes: ext.bytes, avoid: extAvoid, scale, anchorY, undoUp: base.undoUp }; break search }
       }
     }
     if (pick) {
       done = await layoutAdLayers({ ...input, blocks: blocksCur, bytes: pick.bytes, avoid: pick.avoid }); sceneBytes = pick.bytes; sceneAvoid = pick.avoid
       if (scenePrep.roomBelow && !scenePrep.roomBelow.applied) scenePrep.roomBelow.note += '; canvas extended instead'
+      if (pick.undoUp && scenePrep.roomBelow) { scenePrep.roomBelow.applied = false; scenePrep.roomBelow.note += '; undone: the up-shift put the objects under the text — the canvas extension (smaller picture) frees both'; delete scenePrep.roomBelow.shiftPx; delete scenePrep.roomBelow.shiftShare }
       scenePrep.extended = { scale: pick.scale, anchorY: pick.anchorY, reason, note: `canvas extended: picture at ${Math.round(pick.scale * 100)}% with the scene continued around it (row / column background colour + matched grain, no mirror, no frame) so ${reason === 'text' ? 'the text keeps ≥ 85% off the product' : reason === 'cta' ? 'the CTA has a clean slot (off the product, off table edges)' : 'the CTA has a clean slot and the text keeps ≥ 85%'}` }
     }
   }

@@ -8,6 +8,11 @@ export const SUMMARY_MAX = 200
 export const TECHNICAL_SPECS_MAX = 2_000
 /** Free part name stored in product_images.role (e.g. "control tipo gamepad"). */
 export const PART_NAME_MAX = 160
+/**
+ * Round 11: product_images.role is capped at 60 characters by the DB (product_images_role_len, migration 085). A longer part
+ * name / label (finalize_upload stores it in role) is shortened visibly for that column only; the full text stays in `label`.
+ */
+export const ROLE_DB_MAX = 60
 
 export interface TruncationNotice {
   field: string

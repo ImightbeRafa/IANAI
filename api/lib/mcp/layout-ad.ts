@@ -66,6 +66,8 @@ export type AdLayoutReport = CompositeReport & {
     /** Height of the text stack at 88 % of the nominal size (what `make room` aims for). */
     okStackPx?: number
     textTopPx?: number
+    /** Round 11: text elements that sit on a detected object (located box or scene object: edge-dense / off-background cells) — counted as textOverProduct. */
+    overObjects?: Array<{ role: 'headline' | 'price' | 'facts'; share: number }>
   }
   layout: {
     elements: LayoutElement[]
@@ -129,6 +131,42 @@ const dist = (a: Box, b: Box) => {
   return Math.hypot(dx, dy)
 }
 
+/** Round 11: a cell is an object when edge-dense or mostly far from the band's background colour; a text box may touch ≤ 6 % such cells (antialiasing / a stray leaf tip). */
+const LOGO_CENTER_OK = 0.03
+const OBJ_CELL_BUSY = 0.12
+const OBJ_CELL_DEV = 0.45
+const OBJ_TEXT_MAX = 0.06
+
+/** Round 11: the logo's own solid plate — opaque border ring (≥ 92 % opaque, colour spread small) around a mark of another colour. */
+function selfPlate(data: Buffer, ch: number, w: number, h: number): { fill: Rgb; contrast: number } | null {
+  const ring = Math.max(2, Math.round(Math.min(w, h) * 0.04))
+  const inset = Math.max(1, Math.round(Math.min(w, h) * 0.01))
+  const px: Rgb[] = []
+  let tot = 0
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    const d = Math.min(x, y, w - 1 - x, h - 1 - y)
+    if (d < inset || d >= inset + ring) continue
+    tot++
+    const i = (y * w + x) * ch
+    if (data[i + 3] > 230) px.push({ r: data[i], g: data[i + 1], b: data[i + 2] })
+  }
+  if (!tot || px.length / tot < 0.92) return null
+  const med = (k: 'r' | 'g' | 'b') => px.map((p) => p[k]).sort((a, b) => a - b)[px.length >> 1]
+  const fill = { r: med('r'), g: med('g'), b: med('b') }
+  const near = px.filter((p) => Math.hypot(p.r - fill.r, p.g - fill.g, p.b - fill.b) < 28).length
+  if (near / px.length < 0.85) return null
+  // the mark: inner opaque pixels clearly off the plate colour
+  let mr = 0, mg = 0, mb = 0, mn = 0
+  for (let y = inset + ring; y < h - inset - ring; y++) for (let x = inset + ring; x < w - inset - ring; x++) {
+    const i = (y * w + x) * ch
+    if (data[i + 3] < 200) continue
+    if (Math.hypot(data[i] - fill.r, data[i + 1] - fill.g, data[i + 2] - fill.b) < 60) continue
+    mr += data[i]; mg += data[i + 1]; mb += data[i + 2]; mn++
+  }
+  if (mn < 20) return null
+  return { fill, contrast: contrastFromLuminance(luminance({ r: mr / mn, g: mg / mn, b: mb / mn }), luminance(fill)) }
+}
+
 type Fit = { role: 'headline' | 'price' | 'facts'; text: string; size: number; lineH: number; lines: string[]; w: number; h: number; fits: boolean; weight: number; family: string }
 
 export async function layoutAdLayers(input: LayoutInput & { /** Round 10: geometry only (no text rasterising, no final composite; bytes = the input) — used to test many scene variants cheaply. */ probe?: boolean }): Promise<{ bytes: Buffer; report: AdLayoutReport }> {
@@ -163,7 +201,16 @@ export async function layoutAdLayers(input: LayoutInput & { /** Round 10: geomet
   let logoAspect = 0
   let logoTrim: { before: [number, number]; after: [number, number] } | undefined
   let logoAsset: Buffer | null = input.logo ?? null
+  // Round 11: a logo with its own solid plate (opaque, uniform border — the SP navy wordmark badge, the Prototipo plate) keeps its plate margin
+  // (not trimmed as "padding") and never gets a second plate around it
+  let ownPlate: { fill: Rgb; contrast: number } | null = null
   if (logoAsset) {
+    try {
+      const sm = await sharp(logoAsset).rotate().ensureAlpha().resize(256, 256, { fit: 'inside' }).raw().toBuffer({ resolveWithObject: true })
+      ownPlate = selfPlate(sm.data, sm.info.channels, sm.info.width, sm.info.height)
+    } catch { ownPlate = null }
+  }
+  if (logoAsset && !ownPlate) {
     // Round 9: fit the mark by its real aspect — cut transparent / flat padding first
     const t = await trimLogoPadding(logoAsset)
     if (t.trimmed && t.before && t.after) { logoAsset = t.bytes; logoTrim = { before: t.before, after: t.after } }
@@ -235,11 +282,11 @@ export async function layoutAdLayers(input: LayoutInput & { /** Round 10: geomet
   if (blocks.headline) specs.push({ role: 'headline', text: blocks.headline, max: W * 0.0625, min: W * 0.036, lines: 2, prefer: 1, preferMin: W * 0.044, weight: fonts.heading.weight, family, lh: 1.12 })
   if (blocks.price) specs.push({ role: 'price', text: blocks.price, max: W * 0.046, min: W * 0.03, lines: 2, prefer: 1, preferMin: W * 0.034, weight: fonts.body.boldWeight, family: bodyFam, lh: 1.12 })
   for (const f of (blocks.facts ?? []).slice(0, 2)) specs.push({ role: 'facts', text: f, max: W * 0.033, min: W * 0.024, lines: 2, prefer: 1, preferMin: W * 0.027, weight: fonts.body.weight, family: bodyFam, lh: 1.14 })
-  const fitAll = (scale: number): { fits: Fit[]; total: number; ok: boolean } => {
+  const fitAll = (scale: number, widthF = 1): { fits: Fit[]; total: number; ok: boolean } => {
     const out: Fit[] = []
     let ok = true
     for (const s of specs) {
-      const f = fitText({ text: s.text, font: { family: s.family, weight: s.weight }, maxWidth: maxTextW, maxLines: s.lines, preferLines: s.prefer, preferMinSize: s.preferMin ? s.preferMin * scale : undefined, maxSize: s.max * scale, minSize: s.min * scale * 0.9, floorSize: s.min * scale * 0.8, lineHeight: s.lh, balance: true })
+      const f = fitText({ text: s.text, font: { family: s.family, weight: s.weight }, maxWidth: Math.round(maxTextW * widthF), maxLines: s.lines, preferLines: s.prefer, preferMinSize: s.preferMin ? s.preferMin * scale : undefined, maxSize: s.max * scale, minSize: s.min * scale * 0.9, floorSize: s.min * scale * 0.8, lineHeight: s.lh, balance: true })
       if (!f.fits) ok = false
       out.push({ role: s.role, text: f.text, size: f.fontSize, lineH: f.lineHeightPx, lines: f.lines, w: f.width, h: f.height, fits: f.fits, weight: s.weight, family: s.family })
     }
@@ -256,21 +303,77 @@ export async function layoutAdLayers(input: LayoutInput & { /** Round 10: geomet
     for (const s of SCALES) { const r = fitAll(s); if (r.ok && r.total <= avail) return { ...r, scale: s } }
     return null
   }
+  // Round 11: text is NEVER placed over a detected object — the located boxes AND scene objects (the lamp in round 10 A, the kit box in B). Every element box of a
+  // candidate stack is tested: no located-box overlap, and its cells must not look like an object (edge-dense or far from the band's background colour, the
+  // background sampled outside the located boxes). The stack may wrap narrower (lines centred) to pass beside a side object.
+  const bandBg = (y0: number, y1: number): Rgb => {
+    const ch: number[][] = [[], [], []]
+    for (let y = Math.max(0, Math.floor(y0)); y < Math.min(H, Math.ceil(y1)); y += 4) for (let x = 0; x < W; x += 6) {
+      if (avoidBoxes.some((b) => x >= b.x0 * W && x <= b.x1 * W && y >= b.y0 * H && y <= b.y1 * H)) continue
+      const i = (y * W + x) * 3; ch[0].push(raw[i]); ch[1].push(raw[i + 1]); ch[2].push(raw[i + 2])
+    }
+    const med = (a: number[]) => (a.length ? a.sort((p, q) => p - q)[a.length >> 1] : 128)
+    return { r: med(ch[0]), g: med(ch[1]), b: med(ch[2]) }
+  }
+  const objectShare = (b: Box, bg: Rgb): number => {
+    for (const r of avoidBoxes) {
+      const ix = Math.max(0, Math.min(b.x + b.w, r.x1 * W) - Math.max(b.x, r.x0 * W)), iy = Math.max(0, Math.min(b.y + b.h, r.y1 * H) - Math.max(b.y, r.y0 * H))
+      if (ix * iy > b.w * b.h * 0.01) return 1
+    }
+    const cs = Math.max(8, Math.round(W * 0.03))
+    let n = 0, hit = 0
+    for (let y = b.y; y < b.y + b.h - cs * 0.3; y += cs) for (let x = b.x; x < b.x + b.w - cs * 0.3; x += cs) {
+      const cell = { x, y, w: Math.min(cs, b.x + b.w - x), h: Math.min(cs, b.y + b.h - y) }
+      n++
+      if (busy(cell) > OBJ_CELL_BUSY || deviation(raw, W, H, cell, bg) > OBJ_CELL_DEV) hit++
+    }
+    return n ? hit / n : 0
+  }
+  const stackBoxes = (fits: Fit[], y0: number): Box[] => {
+    const out: Box[] = []
+    let y = y0
+    for (const f of fits) { const w = Math.min(maxTextW, f.w); out.push({ x: Math.round((W - w) / 2), y: Math.round(y), w: Math.ceil(w), h: f.h }); y += f.h + gap }
+    return out
+  }
+  const stackHits = (fits: Fit[], y0: number): Array<{ role: Fit['role']; share: number }> => {
+    const boxes = stackBoxes(fits, y0)
+    if (!boxes.length) return []
+    const bg = bandBg(boxes[0].y - H * 0.03, boxes[boxes.length - 1].y + boxes[boxes.length - 1].h + H * 0.03)
+    const hits: Array<{ role: Fit['role']; share: number }> = []
+    boxes.forEach((b, k) => { const pad = Math.round(H * 0.006); const sh = objectShare({ x: b.x - pad, y: b.y - pad, w: b.w + 2 * pad, h: b.h + 2 * pad }, bg); if (sh > OBJ_TEXT_MAX) hits.push({ role: fits[k].role, share: Math.round(sh * 100) / 100 }) })
+    return hits
+  }
+  const pickClear = (avail: number, y0: number, minScale: number) => {
+    for (const s of SCALES) {
+      if (s < minScale - 1e-9) break
+      for (const wf of [1, 0.86, 0.74, 0.62]) { const r = fitAll(s, wf); if (r.ok && r.total <= avail && !stackHits(r.fits, y0).length) return { ...r, scale: s } }
+    }
+    return null
+  }
   let placed: { fits: Fit[]; total: number; scale: number; y: number; corridor: 'top' | 'bottom' | 'over_product'; ok: boolean } | null = null
+  let overObjects: Array<{ role: Fit['role']; share: number }> = []
   if (specs.length) {
     const topAvail = (objTop != null ? Math.min(objTop - gap, ctaTop - gap) : ctaTop - gap) - textTop
     const botStart = objBottom != null ? objBottom + gap : null
     const botAvail = botStart != null ? ctaTop - gap - botStart : 0
-    const top = topAvail > 0 ? pick(topAvail) : null
-    const bot = botStart != null && botAvail > 0 ? pick(botAvail) : null
-    if (top && (top.scale >= 0.8 || !bot || top.scale >= bot.scale)) placed = { ...top, y: textTop, corridor: 'top' }
-    else if (bot) {
-      // bottom corridor: sit the stack right under the objects (text and CTA stay apart)
-      placed = { ...bot, y: botStart!, corridor: 'bottom' }
-    } else {
-      // no calm corridor: smallest type, directly under the logo, over the top of the objects (flagged, scrim guarantees contrast)
-      const r = fitAll(SCALES[SCALES.length - 1])
-      placed = { ...r, scale: SCALES[SCALES.length - 1], y: textTop, corridor: 'over_product' }
+    // clear placements first (top preferred while it reads at ≥ 80 %), then the old size-only choice, flagged when it lands on an object
+    const topC = topAvail > 0 ? pickClear(topAvail, textTop, SCALES[SCALES.length - 1]) : null
+    const botC = botStart != null && botAvail > 0 ? pickClear(botAvail, botStart, SCALES[SCALES.length - 1]) : null
+    if (topC && (topC.scale >= 0.8 || !botC || topC.scale >= botC.scale)) placed = { ...topC, y: textTop, corridor: 'top' }
+    else if (botC) placed = { ...botC, y: botStart!, corridor: 'bottom' }
+    else {
+      const top = topAvail > 0 ? pick(topAvail) : null
+      const bot = botStart != null && botAvail > 0 ? pick(botAvail) : null
+      if (top && (top.scale >= 0.8 || !bot || top.scale >= bot.scale)) placed = { ...top, y: textTop, corridor: 'top' }
+      else if (bot) {
+        // bottom corridor: sit the stack right under the objects (text and CTA stay apart)
+        placed = { ...bot, y: botStart!, corridor: 'bottom' }
+      } else {
+        // no calm corridor: smallest type, directly under the logo, over the top of the objects (flagged, scrim guarantees contrast)
+        const r = fitAll(SCALES[SCALES.length - 1])
+        placed = { ...r, scale: SCALES[SCALES.length - 1], y: textTop, corridor: 'over_product' }
+      }
+      overObjects = placed.corridor === 'over_product' ? [{ role: 'headline', share: 1 }] : stackHits(placed.fits, placed.y)
     }
   }
 
@@ -337,7 +440,8 @@ export async function layoutAdLayers(input: LayoutInput & { /** Round 10: geomet
     }
     const tightBoxes = elements.filter((e) => e.role !== 'logo' && e.role !== 'cta')
     report.text = {
-      drawn: true, corridor: placed.corridor, scale: placed.scale, fits: tightBoxes.every((e) => e.fits !== false), textOverProduct: placed.corridor === 'over_product',
+      drawn: true, corridor: placed.corridor, scale: placed.scale, fits: tightBoxes.every((e) => e.fits !== false), textOverProduct: placed.corridor === 'over_product' || overObjects.length > 0,
+      ...(overObjects.length ? { overObjects } : {}),
       productSource: report.text.productSource, scrim, lowContrast: tightBoxes.some((e) => (e.contrast ?? 0) < 4.5),
       objects: report.text.objects, nominalStackPx: report.text.nominalStackPx, okStackPx: report.text.okStackPx, textTopPx: report.text.textTopPx,
     }
@@ -461,11 +565,14 @@ export async function layoutAdLayers(input: LayoutInput & { /** Round 10: geomet
         let lw = Math.round(lh * logoAspect)
         const maxW = Math.round(W * 0.34)
         if (lw > maxW) { lw = maxW; lh = Math.round(lw / logoAspect) }
-        for (const x of [Math.round((W - lw) / 2), W - sideX - lw, sideX]) {
-          const score = busy({ x: x - W * 0.012, y: logoBox.y - H * 0.006, w: lw + W * 0.024, h: lh + H * 0.012 })
-          if (!best || score < best.score - 1e-9) best = { x, w: lw, h: lh, score }
-          if (score <= 0.012) { best = { x, w: lw, h: lh, score }; break search }
-        }
+        // Round 11: the centre is the brand's default slot — it is kept while it is calm enough (≤ 0.03) or within 0.02 of the calmest side
+        // (round 10 B: the logo drifted to the left over a 0.01 busyness difference)
+        const xs = [Math.round((W - lw) / 2), W - sideX - lw, sideX]
+        const scores = xs.map((x) => busy({ x: x - W * 0.012, y: logoBox.y - H * 0.006, w: lw + W * 0.024, h: lh + H * 0.012 }))
+        const minS = Math.min(...scores)
+        const k = scores[0] <= LOGO_CENTER_OK || scores[0] <= minS + 0.02 ? 0 : scores.indexOf(minS)
+        if (!best || scores[k] < best.score - 1e-9) best = { x: xs[k], w: lw, h: lh, score: scores[k] }
+        if (scores[k] <= 0.012 || k === 0) break search
       }
       const { x: lx, w: lw, h: lh } = best!
       const ly = logoBox.y
@@ -481,7 +588,11 @@ export async function layoutAdLayers(input: LayoutInput & { /** Round 10: geomet
       const glow = false
       let plate: { fill: string; contrast: number } | undefined
       let contrastFinal = contrast
-      if (contrast < 4.5) {
+      // Round 11: a logo that carries its OWN solid plate (opaque, uniform border ring — the SP navy wordmark badge) never gets a second plate around it
+      // (round 10 SP: navy plate inside a gold plate). What must read is the mark on its own plate; that contrast is reported.
+      const own = ownPlate
+      if (own && contrast < 4.5) contrastFinal = Math.round(own.contrast * 100) / 100
+      if (contrast < 4.5 && !own) {
         const pal = [input.palette?.secondary, input.palette?.primary, input.palette?.accent].map((c) => parseColor(c)).filter((c): c is Rgb => Boolean(c))
         const opts = [...pal, WHITE, INK].map((c) => ({ c, k: contrastFromLuminance(luminance(logoMean), luminance(c)) }))
         const brandOk = opts.slice(0, pal.length).filter((o) => o.k >= 4.5).sort((a, b) => b.k - a.k)[0]
@@ -494,7 +605,7 @@ export async function layoutAdLayers(input: LayoutInput & { /** Round 10: geomet
       }
       layers.push({ input: logoPng, left: lx, top: ly })
       const box = { x: lx, y: ly, w: lw, h: lh }
-      report.logo = { status: 'drawn', box, contrast: contrastFinal, glow, ...(plate ? { plate, contrastBefore: contrast } : {}), ...(logoTrim ? { trimmed: logoTrim } : {}) }
+      report.logo = { status: 'drawn', box, contrast: contrastFinal, glow, ...(plate ? { plate, contrastBefore: contrast } : {}), ...(own ? { selfPlated: { fill: toHex(own.fill), markContrast: Math.round(own.contrast * 100) / 100, sceneContrast: contrast } } : {}), ...(logoTrim ? { trimmed: logoTrim } : {}) }
       elements.push({ id: 'logo', role: 'logo', box, contrast: contrastFinal, fits: true })
     } catch (err) {
       report.logo = { status: 'unavailable', reason: `logo asset could not be drawn: ${err instanceof Error ? err.message.slice(0, 120) : 'error'}` }

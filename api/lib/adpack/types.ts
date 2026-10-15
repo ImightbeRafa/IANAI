@@ -356,6 +356,10 @@ export interface StoredCutout {
   flatLay?: boolean
   /** Share of the cut-out still showing the source photo's backdrop / shadow (round 1, P2). */
   backgroundLeak?: number
+  /** Round 11: delivered mask vs an independent product silhouette in the SOURCE PHOTO (IoU, 0–1). */
+  photoIoU?: number
+  /** Round 11: the first mask missed a light part on a light backdrop and was repaired. */
+  maskRepaired?: boolean
   /** Round-1 P4: pinned photo (id or url) that failed to cut out; this cut-out is its replacement. */
   fallbackFrom?: string
 }

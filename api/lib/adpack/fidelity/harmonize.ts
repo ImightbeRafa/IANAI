@@ -371,6 +371,9 @@ export function shadingStrength(keyFill: number): number {
 }
 
 /** Exposure gain (0.75–1.08) that keeps the product's mean light level within 0.9–3.2× the plate's around the slot. */
+/** Round 11: linear ambient luma under which the scene counts as a night / low-key scene. */
+export const NIGHT_AMBIENT = 0.05
+
 export function exposureGain(R: Float32Array, G: Float32Array, B: Float32Array, solid: Uint8Array, model: Pick<LightModel, 'ambient'>): number {
   let sum = 0
   let n = 0
@@ -383,7 +386,8 @@ export function exposureGain(R: Float32Array, G: Float32Array, B: Float32Array, 
   const yp = Math.max(1e-4, sum / n)
   const ya = Math.max(1e-3, lumaLin(srgbToLinear(model.ambient[0]), srgbToLinear(model.ambient[1]), srgbToLinear(model.ambient[2])))
   const target = clamp(yp, ya * 0.9, ya * 3.2)
-  return clamp(Math.pow(target / yp, 0.6), 0.75, 1.08)
+  // Round 11: a night scene (ambient luma < 0.05 linear — SP nightstand) lets the product come down further (0.66) so a studio-lit pouch does not glow on it
+  return clamp(Math.pow(target / yp, 0.6), ya < NIGHT_AMBIENT ? 0.66 : 0.75, 1.08)
 }
 
 export interface ProductMaskInfo {

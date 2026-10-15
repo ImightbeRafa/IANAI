@@ -39,7 +39,34 @@ export function ocrAvailable(run: Runner = defaultRunner): Promise<boolean> {
 }
 
 /** Words (lower-case, edge punctuation stripped, internal hyphens kept, ≥ 4 letters, mostly letters) read by Tesseract (sparse text mode). */
-export async function ocrWords(bytes: Buffer, opts: { box?: { x0: number; y0: number; x1: number; y1: number } | null; run?: Runner } = {}): Promise<string[]> {
+export async function ocrWords(bytes: Buffer, opts: { box?: { x0: number; y0: number; x1: number; y1: number } | null; run?: Runner; /** Round 11: also read 2 × 3 overlapping tiles, each upscaled (small print: round 9 SP "Ingocdicotes"). */ tiles?: boolean } = {}): Promise<string[]> {
+  const r = await ocrWordsSplit(bytes, opts)
+  return [...r.whole, ...r.tiles]
+}
+
+/** Round 11: whole-crop words and tile-only words, kept apart (a tile misread is held to a stricter rule). */
+export async function ocrWordsSplit(bytes: Buffer, opts: { box?: { x0: number; y0: number; x1: number; y1: number } | null; run?: Runner; tiles?: boolean } = {}): Promise<{ whole: string[]; tiles: string[] }> {
+  const whole = await ocrWordsOnce(bytes, opts)
+  if (!opts.tiles) return { whole, tiles: [] }
+  const meta = await sharp(bytes).rotate().metadata()
+  const W = meta.width ?? 0, H = meta.height ?? 0
+  if (!W || !H) return { whole, tiles: [] }
+  const b = opts.box ?? { x0: 0, y0: 0, x1: 1, y1: 1 }
+  const out: string[] = []
+  const C = 2, R = 3, ov = 0.15
+  const bw = (b.x1 - b.x0) * W, bh = (b.y1 - b.y0) * H
+  for (let r = 0; r < R; r++) for (let c = 0; c < C; c++) {
+    const tw = (bw / C) * (1 + ov), th = (bh / R) * (1 + ov)
+    const x = Math.max(0, b.x0 * W + (c * bw) / C - (tw * ov) / 2), y = Math.max(0, b.y0 * H + (r * bh) / R - (th * ov) / 2)
+    const w = Math.round(Math.min(tw, W - x)), h = Math.round(Math.min(th, H - y))
+    if (w < 24 || h < 24) continue
+    const tile = await sharp(bytes).rotate().extract({ left: Math.round(x), top: Math.round(y), width: Math.min(w, W - Math.round(x)), height: Math.min(h, H - Math.round(y)) }).png().toBuffer()
+    out.push(...(await ocrWordsOnce(tile, { run: opts.run })))
+  }
+  return { whole, tiles: out }
+}
+
+async function ocrWordsOnce(bytes: Buffer, opts: { box?: { x0: number; y0: number; x1: number; y1: number } | null; run?: Runner } = {}): Promise<string[]> {
   let img = sharp(bytes).rotate().flatten({ background: '#ffffff' })
   const meta = await img.metadata()
   const W = meta.width ?? 0, H = meta.height ?? 0
@@ -82,8 +109,12 @@ export function editDistance(a: string, b: string): number {
 
 /** Compare the reference words with the generated ones (pure, used by the tests with fixed word lists). */
 export function compareWords(reference: string[], generated: string[]): Omit<Extract<PackTextCheck, { status: 'pass' | 'warning' | 'fail' }>, 'engine'> {
-  const ref = [...new Set(reference)]
-  const gen = new Set(generated)
+  // Round 11: tile OCR reads partial words at tile borders ("natu" / "natur" of "naturales"): a word contained in a longer word of the same list (or, for the
+  // generated side, in a reference word) is a fragment, not a print
+  const r0 = [...new Set(reference)]
+  const ref = r0.filter((w) => !r0.some((v) => v !== w && v.length > w.length && v.includes(w)))
+  const g0 = [...new Set(generated)]
+  const gen = new Set(g0.filter((g) => !g0.some((v) => v !== g && v.length > g.length && v.includes(g)) && !ref.some((v) => v !== g && v.length > g.length && v.includes(g))))
   const exact: string[] = []
   const misspelled: Array<{ expected: string; found: string; distance: number }> = []
   const missing: string[] = []
@@ -104,7 +135,7 @@ export function compareWords(reference: string[], generated: string[]): Omit<Ext
 }
 
 /** OCR of reference photos (the same product photo is checked on every attempt / retry). */
-const refCache = new Map<string, string[]>()
+const refCache = new Map<string, { whole: string[]; tiles: string[] }>()
 
 /** Reference photo vs generated scene. Needs ≥ 4 readable words on the reference (otherwise 'skipped': nothing to compare). */
 /** Round 10: printed strings quoted in the offer's immutable attributes ('Sleeping Patches CR', "30 patches", “…”), as OCR-comparable words (same filter as ocrWords). */
@@ -122,15 +153,17 @@ export function attributePrintedWords(attributes: Array<string | null | undefine
   return [...new Set(out)]
 }
 
-export async function checkPackText(input: { reference: Buffer; generated: Buffer; generatedBox?: { x0: number; y0: number; x1: number; y1: number } | null; run?: Runner; /** Round 10: offer immutable attributes (quoted printed strings are used when the reference photo has < 4 readable words). */ attributes?: Array<string | null | undefined> }): Promise<PackTextCheck & { referenceSource?: 'photo' | 'photo+attributes' }> {
+export async function checkPackText(input: { reference: Buffer; generated: Buffer; generatedBox?: { x0: number; y0: number; x1: number; y1: number } | null; run?: Runner; /** Round 10: offer immutable attributes (quoted printed strings are used when the reference photo has < 4 readable words). */ attributes?: Array<string | null | undefined>; /** Round 11: tile OCR for the small print (default on). */ tiles?: boolean }): Promise<PackTextCheck & { referenceSource?: 'photo' | 'photo+attributes' }> {
   if (!(await ocrAvailable(input.run))) return { status: 'unavailable', engine: OCR_ENGINE, reason: 'tesseract OCR binary not installed: printed-text check not run' }
   try {
-    const key = createHash('sha1').update(input.reference).digest('hex')
-    let ref = input.run ? undefined : refCache.get(key)
-    if (!ref) {
-      ref = await ocrWords(input.reference, { run: input.run })
-      if (!input.run) { refCache.set(key, ref); if (refCache.size > 32) refCache.delete(refCache.keys().next().value!) }
+    const key = createHash('sha1').update(input.reference).update(input.tiles === false ? ':whole' : ':tiles').digest('hex')
+    let refSplit = input.run ? undefined : refCache.get(key)
+    if (!refSplit) {
+      refSplit = await ocrWordsSplit(input.reference, { run: input.run, tiles: input.tiles !== false })
+      if (!input.run) { refCache.set(key, refSplit); if (refCache.size > 32) refCache.delete(refCache.keys().next().value!) }
     }
+    let ref = [...refSplit.whole, ...refSplit.tiles]
+    const refWhole = new Set(refSplit.whole)
     let source: 'photo' | 'photo+attributes' = 'photo'
     if (new Set(ref).size < 4) {
       const attr = attributePrintedWords(input.attributes)
@@ -139,8 +172,16 @@ export async function checkPackText(input: { reference: Buffer; generated: Buffe
       ref = merged
       source = 'photo+attributes'
     }
-    const gen = await ocrWords(input.generated, { box: input.generatedBox ?? null, run: input.run })
-    const cmp = compareWords(ref, gen)
+    const genSplit = await ocrWordsSplit(input.generated, { box: input.generatedBox ?? null, run: input.run, tiles: input.tiles !== false })
+    const genWhole = new Set(genSplit.whole)
+    let cmp = compareWords(ref, [...genSplit.whole, ...genSplit.tiles])
+    // Round 11: a misspelling seen only in a tile read (either side) must be ≥ 2 edits — one-letter tile misreads of REAL print ("ingredicntes") are OCR noise
+    const weak = cmp.misspelled.filter((m) => m.distance < 2 && (!genWhole.has(m.found) || !refWhole.has(m.expected)))
+    if (weak.length) {
+      const misspelled = cmp.misspelled.filter((m) => !weak.includes(m))
+      const missing = [...cmp.missing, ...weak.map((m) => m.expected)]
+      cmp = { ...cmp, misspelled, missing, status: misspelled.length ? 'fail' : 'pass', reason: misspelled.length ? `the printing on the product was redrawn with ${misspelled.length} misspelled word(s): ${misspelled.map((m) => `"${m.found}" instead of "${m.expected}"`).join(', ')} (OCR, ${cmp.exact.length}/${cmp.referenceWords.length} reference words exact)` : `the printed words of the reference read the same on the generated product (${cmp.exact.length}/${cmp.referenceWords.length} exact, ${missing.length} not readable / hidden)` }
+    }
     return { engine: OCR_ENGINE, ...cmp, ...(source !== 'photo' ? { referenceSource: source, reason: `${cmp.reason} (reference = photo words + the printed strings quoted in the offer attributes)` } : {}) }
   } catch (err) {
     return { status: 'unavailable', engine: OCR_ENGINE, reason: `OCR failed: ${err instanceof Error ? err.message.slice(0, 120) : 'error'}` }

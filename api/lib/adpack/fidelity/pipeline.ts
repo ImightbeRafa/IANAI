@@ -61,12 +61,14 @@ async function sourceBytes(url: string, ctx: CutoutContext): Promise<Uint8Array>
  * cached in storage by an older segmenter (round 1: Prototipo plane with backdrop halo baked in) are
  * never reused. Storage key = `<sha256>-<version>`; `sourceHash` stays the plain photo hash.
  */
-export const CUTOUT_CACHE_VERSION = 'seg2'
+/** Round 11: cut-out vs reference-photo silhouette below this → warning. */
+export const PHOTO_IOU_WARN = 0.9
+export const CUTOUT_CACHE_VERSION = 'seg3'
 export const cutoutCacheKey = (hash: string) => `${hash}-${CUTOUT_CACHE_VERSION}`
 
 /** In-process LRU of cut-outs / photo quality by source hash (warm instances skip re-segmentation). */
 const MEMO_MAX = 24
-const cutoutMemo = new Map<string, { png: Uint8Array; width: number; height: number; method: CutoutMethod; recall?: number; flatLay?: boolean; backgroundLeak?: number }>()
+const cutoutMemo = new Map<string, { png: Uint8Array; width: number; height: number; method: CutoutMethod; recall?: number; flatLay?: boolean; backgroundLeak?: number; photoIoU?: number; maskRepaired?: boolean }>()
 const qualityMemo = new Map<string, AssetQuality>()
 function remember<V>(map: Map<string, V>, key: string, value: V): void {
   if (map.size >= MEMO_MAX) map.delete(map.keys().next().value as string)
@@ -123,7 +125,7 @@ async function cutoutIsFlatLay(png: Uint8Array, role: ProductPhoto['role']): Pro
   }
 }
 
-function storedCutout(photo: ProductPhoto, url: string, method: StoredCutout['method'], hash: string, extra: { recall?: number; flatLay?: boolean; backgroundLeak?: number }): StoredCutout {
+function storedCutout(photo: ProductPhoto, url: string, method: StoredCutout['method'], hash: string, extra: { recall?: number; flatLay?: boolean; backgroundLeak?: number; photoIoU?: number; maskRepaired?: boolean }): StoredCutout {
   return {
     url,
     role: photo.role,
@@ -135,6 +137,8 @@ function storedCutout(photo: ProductPhoto, url: string, method: StoredCutout['me
     ...(typeof extra.recall === 'number' ? { recall: extra.recall } : {}),
     ...(extra.flatLay ? { flatLay: true } : {}),
     ...(typeof extra.backgroundLeak === 'number' ? { backgroundLeak: extra.backgroundLeak } : {}),
+    ...(typeof extra.photoIoU === 'number' ? { photoIoU: extra.photoIoU } : {}),
+    ...(extra.maskRepaired ? { maskRepaired: true } : {}),
   }
 }
 
@@ -145,7 +149,7 @@ async function cutoutFromBytes(photo: ProductPhoto, bytes: Uint8Array, hash: str
     // Still make sure the storage copy exists (URL for the item) — cheap when it does.
     const hit = await ctx.cache.get(key).catch(() => null)
     if (hit) {
-      return { stored: storedCutout(photo, hit.url, 'cache', hash, { recall: local.recall, flatLay: local.flatLay || photo.role === 'contents', backgroundLeak: local.backgroundLeak }), bytes: hit.bytes, width: local.width, height: local.height }
+      return { stored: storedCutout(photo, hit.url, 'cache', hash, { recall: local.recall, flatLay: local.flatLay || photo.role === 'contents', backgroundLeak: local.backgroundLeak, photoIoU: local.photoIoU, maskRepaired: local.maskRepaired }), bytes: hit.bytes, width: local.width, height: local.height }
     }
   }
   const cached = ctx.cache ? await ctx.cache.get(key).catch(() => null) : null
@@ -163,7 +167,7 @@ async function cutoutFromBytes(photo: ProductPhoto, bytes: Uint8Array, hash: str
     const res = await segmentProduct({ bytes, role: photo.role, label: photo.label, gateway: ctx.gateway })
     // cutout_incomplete: a mask was found but it dropped product pieces — never delivered (P0 #4).
     if (!res.ok) return { error: `${res.reason}: ${res.detail}` }
-    made = { png: new Uint8Array(res.png), width: res.width, height: res.height, method: res.method, ...(res.recall ? { recall: res.recall.recall } : {}), ...(res.flatLay ? { flatLay: true } : {}), ...(typeof res.backgroundLeak === 'number' ? { backgroundLeak: res.backgroundLeak } : {}) }
+    made = { png: new Uint8Array(res.png), width: res.width, height: res.height, method: res.method, ...(res.recall ? { recall: res.recall.recall } : {}), ...(res.flatLay ? { flatLay: true } : {}), ...(typeof res.backgroundLeak === 'number' ? { backgroundLeak: res.backgroundLeak } : {}), ...(typeof res.photoIoU === 'number' ? { photoIoU: res.photoIoU } : {}), ...(res.maskCoverage?.repaired ? { maskRepaired: true } : {}) }
     remember(cutoutMemo, key, made)
   }
   const png = made.png
@@ -176,7 +180,7 @@ async function cutoutFromBytes(photo: ProductPhoto, bytes: Uint8Array, hash: str
     }
   }
   return {
-    stored: storedCutout(photo, url, made.method, hash, { recall: made.recall, flatLay: made.flatLay || photo.role === 'contents', backgroundLeak: made.backgroundLeak }),
+    stored: storedCutout(photo, url, made.method, hash, { recall: made.recall, flatLay: made.flatLay || photo.role === 'contents', backgroundLeak: made.backgroundLeak, photoIoU: made.photoIoU, maskRepaired: made.maskRepaired }),
     bytes: png,
     width: made.width,
     height: made.height,
@@ -383,6 +387,10 @@ export async function generateExactProductImage(input: ExactImageInput): Promise
   const p0 = comp.placements[0]
   const score = await scoreFidelity({ image: png, box: p0.box, reference: p0.placed, ...(p0.background ? { background: p0.background } : {}), method, diff: true })
   if (!score.passed) return { ok: false, error: `fidelity_failed: ${fidelityFailReason(score)}`, costUsd, warnings }
+  // Round 11: the cut-out vs the reference PHOTO (the score above compares the composite with its own cut-out)
+  const photoIoU = cutouts.hero.stored.photoIoU
+  if (cutouts.hero.stored.maskRepaired) warnings.push('cut-out mask repaired: a light part of the product on a light backdrop was missed by the first mask and added back')
+  if (typeof photoIoU === 'number' && photoIoU < PHOTO_IOU_WARN) warnings.push(`cut-out vs the reference photo: silhouette IoU ${photoIoU} < ${PHOTO_IOU_WARN} — part of the product may be missing or extra backdrop kept`)
   const halo = await measureHalo({ composite: png, box: p0.box, placed: p0.placed, ...(p0.background ? { background: p0.background } : { background: p0.placed }), ...(typeof cutouts.hero.stored.backgroundLeak === 'number' ? { leak: cutouts.hero.stored.backgroundLeak } : {}) }).catch((): HaloReport => ({ leak: null, haze: 0, ringPixels: 0, flagged: false, reasons: [] }))
   return {
     ok: true,

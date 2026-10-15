@@ -153,16 +153,33 @@ async function resolveOwnedReferenceImages(options: {
 }): Promise<McpOwnedImage[]> {
   const images: McpOwnedImage[] = []
   for (const imageId of options.imageIds) {
-    const image = await options.artifactStore.getOwnedProductImage({
+    // Round 11: an asset of ANOTHER offer of the same brand can be reused — still tenant-checked (the image's user_id AND
+    // its offer's business_id + owner_id must match; a foreign brand / user never resolves).
+    const image = (await options.artifactStore.getOwnedProductImage({
       userId: options.userId,
       brandId: options.brandId,
       offerId: options.offerId,
       imageId,
-    })
-    if (!image) throw new Error(`Reference image ${imageId} not found for this brand/offer`)
+    })) ?? (await options.artifactStore.getOwnedProductImage({
+      userId: options.userId,
+      brandId: options.brandId,
+      imageId,
+    }))
+    if (!image) throw new Error(`Reference image ${imageId} not found for this brand (any of its offers)`)
     images.push(image)
   }
   return images
+}
+
+/** Round 11: the productFidelity a job will resolve to (same rule as runImageGenerateBody: explicit wins; a printed pack whose hero is not a box / part photo → "exact"). */
+export function resolveQuotedProductFidelity(o: { explicit?: 'exact' | 'generated'; ctx: { offers: Array<{ id: string; name?: string | null; type?: string | null; productDescription?: string | null; technicalSpecs?: string | null }> }; offerId: string; productAssets: McpOwnedImage[]; productImageId?: string; productNotes?: string }): 'exact' | 'generated' {
+  if (o.explicit) return o.explicit
+  const offer = o.ctx.offers.find((x) => x.id === o.offerId)
+  const sku = o.productImageId ? o.productAssets.find((i) => i.id === o.productImageId) : undefined
+  const role = sku ? (roleFromImageRow({ tags: sku.tags, is_primary: sku.isPrimary }) ?? roleFromLabel(sku.label)) : undefined
+  const pack = isPackProduct([offer?.name ?? undefined, offer?.type ?? undefined, offer?.productDescription ?? undefined, offer?.technicalSpecs ?? undefined, o.productNotes])
+  const hasPhoto = o.productAssets.length > 0 || Boolean(o.productImageId)
+  return pack && hasPhoto && !(role && ['box', 'contents', 'part'].includes(role)) ? 'exact' : 'generated'
 }
 
 async function resolveOwnedReferenceUrls(options: {
@@ -714,7 +731,9 @@ export async function mcpExecuteImageGenerate(options: {
     offerId,
     imageIds: selectedReferenceIds,
   })
-  const boundWithOffer = { ...boundInput, offerId }
+  // Round 11: the quote / approval reports the productFidelity the job will ACTUALLY use (a printed pack defaults to "exact"), not 'generated'
+  const quotedFidelity = resolveQuotedProductFidelity({ explicit: fidelityArgs.productFidelity, ctx: ctxPreview, offerId, productAssets, productImageId, productNotes: fidelityArgs.productNotes })
+  const boundWithOffer = { ...boundInput, productFidelity: quotedFidelity, offerId }
 
   if (!approvalRequestId) {
     const quote = quoteLegacyActionCredits('image', 'grok-imagine')
@@ -902,6 +921,7 @@ async function runImageGenerateBody(options: {
   const packOffer = isPackProduct([offerForKind?.name, offerForKind?.type, offerForKind?.productDescription, offerForKind?.technicalSpecs, options.productNotes])
   const productFidelityWarning = options.productFidelity === 'generated' && packDefault ? packGeneratedWarning() : undefined
   let packFallback: { from: 'generated'; to: 'exact'; reason: string; failed?: boolean; generatedQa?: unknown } | undefined
+  let fidelityFallback: { from: 'generated'; to: 'exact'; score: number; reason: string; failed?: boolean; generatedQa?: unknown } | undefined
   const fidelityDefaultNote = !options.productFidelity && fidelityMode === 'exact' ? 'productFidelity defaulted to "exact" for a printed pack / pouch (real product pixels, the printing is never redrawn); pass productFidelity:"generated" to let the model redraw it' : undefined
   let fidelity: Record<string, unknown> | null = null
   let promptUsed = prompt
@@ -1048,6 +1068,17 @@ async function runImageGenerateBody(options: {
         packFallback = { from: 'generated', to: 'exact', failed: true, reason: `exact fallback failed: ${err instanceof Error ? err.message.slice(0, 120) : 'error'} — the generated image (misspelled print) is kept` }
       }
     }
+    // Round 11: the product was redrawn (fidelity < 0.7 after the one retry) → the real-pixel path with the same layers
+    else if (web.fidelityFallback && exactProductUrls.length) {
+      const genReason = web.fidelityFallback.reason
+      const genPostCheck = postCheck
+      try {
+        await runExact()
+        fidelityFallback = { from: 'generated', to: 'exact', score: web.fidelityFallback.score, reason: `${genReason}: switched to productFidelity "exact" (real product pixels)`, generatedQa: (genPostCheck as { qa?: unknown } | null)?.qa ?? null }
+      } catch (err) {
+        fidelityFallback = { from: 'generated', to: 'exact', score: web.fidelityFallback.score, failed: true, reason: `exact fallback failed: ${err instanceof Error ? err.message.slice(0, 120) : 'error'} — the generated image (redrawn product) is kept` }
+      }
+    }
   }
 
   const persistStarted = Date.now()
@@ -1142,10 +1173,11 @@ async function runImageGenerateBody(options: {
     grokMode: generated.mode,
     lockApplied: generated.lockApplied,
     estimatedCostUsd: generated.estimatedCostUsd,
-    productFidelity: packFallback && !packFallback.failed ? 'exact' : fidelityMode,
+    productFidelity: (packFallback && !packFallback.failed) || (fidelityFallback && !fidelityFallback.failed) ? 'exact' : fidelityMode,
     ...(fidelityDefaultNote ? { productFidelityNote: fidelityDefaultNote } : {}),
     ...(productFidelityWarning ? { productFidelityWarning } : {}),
     ...(packFallback ? { packFallback } : {}),
+    ...(fidelityFallback ? { fidelityFallback } : {}),
     ...(fidelity ? { fidelity } : {}),
     ...(postCheck || {}),
     raw,

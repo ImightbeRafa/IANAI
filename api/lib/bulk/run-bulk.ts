@@ -324,7 +324,7 @@ export async function runBulkPosts(options: {
           variation: absoluteIndex,
         })
         if (!exact.ok) throw new Error(exact.error)
-        fidelity = { score: exact.fidelity.score, passed: exact.fidelity.passed, method: exact.fidelity.method, ssim: exact.fidelity.ssim, deltaE: exact.fidelity.deltaE, silhouetteIoU: exact.score.silhouetteIoU, hueShift: exact.score.hueShift }
+        fidelity = { score: exact.fidelity.score, passed: exact.fidelity.passed, method: exact.fidelity.method, ssim: exact.fidelity.ssim, deltaE: exact.fidelity.deltaE, silhouetteIoU: typeof exact.cutout.photoIoU === 'number' ? exact.cutout.photoIoU : exact.score.silhouetteIoU, silhouetteVs: typeof exact.cutout.photoIoU === 'number' ? 'photo' : 'cutout', cutoutIoU: exact.score.silhouetteIoU, ...(exact.cutout.maskRepaired ? { maskRepaired: true } : {}), hueShift: exact.score.hueShift }
         generated = { imageDataUrl: exactResultDataUrl(exact), providerModel: exact.plateModel || imageModel, estimatedCostUsd: exact.costUsd, resolution: `${exact.width}x${exact.height}`, quality: 'medium', mode: 'exact_composite', lockApplied: true }
       } else {
         // Web path: same prompt/refs/logo/lock/clamp-retry as /api/generate-image (api/lib/web-post-image.ts).

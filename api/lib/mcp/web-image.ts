@@ -30,6 +30,8 @@ const TEXT_SCALE_WARN = 0.8
 const TEXT_SCALE_LOW = 0.75
 /** A hero-product fidelity score below this raises the severity (and triggers the one retry). */
 const FIDELITY_RETRY_BELOW = 0.75
+/** Round 11: a redrawn product (round 10 A: plane 0.57, extra fold, white propeller) → forced retry, then the caller falls back to productFidelity "exact". */
+export const FIDELITY_FALLBACK_BELOW = 0.7
 
 export type OfferLock = {
   lockProductAppearance?: boolean
@@ -216,7 +218,7 @@ export type WebStyleImageOutput = {
   fidelityCheck: FidelityCheckResult
   fidelity_warning?: FidelityWarning
   qa: McpImageQa
-  autoRetry: { requested: boolean; attempted: boolean; /** Round 10: the retry ran although autoRetry was not requested, because the pack printing was misspelled. */ forcedBy?: 'packText'; reason?: string; kept?: 'first' | 'retry'; keptReason?: string; firstSeverity?: number; retrySeverity?: number; factors?: { first: Record<string, number>; retry: Record<string, number> }; firstQa?: { safeZones: McpImageQa['safeZones']; textPresent: McpImageQa['textPresent']; issues: string[] } }
+  autoRetry: { requested: boolean; attempted: boolean; /** Round 10: the retry ran although autoRetry was not requested, because the pack printing was misspelled. */ forcedBy?: 'packText' | 'fidelity'; reason?: string; kept?: 'first' | 'retry'; keptReason?: string; firstSeverity?: number; retrySeverity?: number; factors?: { first: Record<string, number>; retry: Record<string, number> }; firstQa?: { safeZones: McpImageQa['safeZones']; textPresent: McpImageQa['textPresent']; issues: string[] } }
   references: { used: WebPostGrokImageResult['referencesUsed']; warnings: WebPostGrokImageResult['referenceWarnings'] }
   /** What was allowed in the scene. Local pixel detection of invented props is not available: prevented at the prompt/reference level. */
   propsPolicy: { forbidExtraProps: boolean; allowed: string[]; accessoryReferences: number; verifiedLocally: boolean; source: 'input' | 'none'; check?: ExtraObjectsFinding; unlisted?: Array<{ label: string; inliers: number }> }
@@ -226,6 +228,8 @@ export type WebStyleImageOutput = {
   scenePrep?: ScenePrepReport
   /** Round 7: set when the fidelity warning survived (the one retry included): the real-pixels path is the way out. */
   suggestedFallback?: { productFidelity: 'exact'; reason: string }
+  /** Round 11: the product fidelity stayed below FIDELITY_FALLBACK_BELOW after the retry → the MCP caller switches to the exact path. */
+  fidelityFallback?: { score: number; reason: string }
   copyNormalised: string[]
   /** Copy lines moved off the image by the layout cap (put them in the caption). */
   copyOverflow: string[]
@@ -719,10 +723,13 @@ export async function generateWebStyleImage(input: WebStyleImageInput): Promise<
   let kept: Attempt = await finishAttempt(firstGrok, await reframe(firstGrok.imageDataUrl, firstGrok.aspectRatio))
   // Round 10: a misspelled pack print always gets the one corrective regeneration (then the caller falls back to productFidelity "exact")
   const packForced = kept.packText?.status === 'fail' && input.autoRetry !== false
-  if ((input.autoRetry === true && kept.decisionSeverity > 0) || packForced) {
+  // Round 11: a redrawn product (fidelity < 0.7 on the same-view hero) always gets the one corrective regeneration too
+  const lowFidelity = (a: Attempt) => !viewMayChange && a.fidelityCheck.status === 'warning' && a.fidelityCheck.warning.score < FIDELITY_FALLBACK_BELOW && a.fidelityCheck.warning.details.confident === true
+  const fidelityForced = !packForced && lowFidelity(kept) && input.autoRetry !== false
+  if ((input.autoRetry === true && kept.decisionSeverity > 0) || packForced || fidelityForced) {
     // One corrective regeneration inside the same job: no second approval, no second charge (the caller charges once).
     autoRetry.attempted = true
-    if (input.autoRetry !== true) autoRetry.forcedBy = 'packText'
+    if (input.autoRetry !== true) autoRetry.forcedBy = packForced ? 'packText' : 'fidelity'
     autoRetry.reason = hint(kept.qa)
     autoRetry.firstQa = { safeZones: kept.qa.safeZones, textPresent: kept.qa.textPresent, issues: kept.qa.warnings.slice(0, 6) }
     try {
@@ -764,7 +771,11 @@ export async function generateWebStyleImage(input: WebStyleImageInput): Promise<
     : productKind === 'plane' && !viewMayChange && fidelityCheck.status === 'warning' && fidelityCheck.warning.score < FIDELITY_RETRY_BELOW
     ? { productFidelity: 'exact', reason: `the product still differs from the reference photo (fidelity ${fidelityCheck.warning.score} < ${FIDELITY_RETRY_BELOW})${autoRetry.attempted ? ' after the one automatic retry' : ''}: re-run with productFidelity:"exact" (real product pixels + the same logo / text / CTA layers) — it is not run automatically because it is a second paid generation` }
     : undefined
+  const fidelityFallback: WebStyleImageOutput['fidelityFallback'] = lowFidelity(kept) && fidelityCheck.status === 'warning'
+    ? { score: fidelityCheck.warning.score, reason: `the product was redrawn (fidelity ${fidelityCheck.warning.score} < ${FIDELITY_FALLBACK_BELOW} vs the reference photo${autoRetry.attempted ? ', after the one automatic retry' : ''})` }
+    : undefined
   return {
+    ...(fidelityFallback ? { fidelityFallback } : {}),
     generated: {
       imageDataUrl,
       providerModel: grok.providerModel,

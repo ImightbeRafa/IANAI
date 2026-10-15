@@ -13,6 +13,8 @@
 import { readFileSync } from 'node:fs'
 import sharp from 'sharp'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+// Round 11: pack OCR reads 2×3 tiles too (small print) → slower real-OCR flows
+vi.setConfig({ testTimeout: 60_000 })
 import { blendSeams, detectSeams, neighbourDetail, DETAIL_REFUSE } from '../api/lib/mcp/scene-prep'
 import { prepareAndLayout } from '../api/lib/mcp/compose-scene'
 import { splitCopyBlocks } from '../api/lib/mcp/layout-ad'
@@ -259,5 +261,5 @@ describe('units: claims filter, product kind, logo check, prompt wording', () =>
     expect(en).toMatch(/every part, colour, material and proportion of the product exactly as in the reference photo/)
     expect(en).not.toMatch(/wheels|landing gear|propellers|flaps|controller/)
   })
-  it('MCP 0.23.0', () => expect(MCP_VERSION).toBe('0.23.0'))
+  it('MCP 0.24.0', () => expect(MCP_VERSION).toBe('0.24.0'))
 })

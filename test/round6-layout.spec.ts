@@ -199,5 +199,5 @@ describe('round 6: prop detection on the round-5c raw scene images', () => {
 })
 
 describe('round 6: version', () => {
-  it('MCP 0.23.0', () => expect(MCP_VERSION).toBe('0.23.0'))
+  it('MCP 0.24.0', () => expect(MCP_VERSION).toBe('0.24.0'))
 })
