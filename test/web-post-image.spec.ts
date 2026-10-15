@@ -236,17 +236,25 @@ describe('generateWebStyleImage (MCP bridge, mocked xAI)', () => {
     expect(Math.abs((meta.width! / meta.height!) - 0.8)).toBeLessThan(0.01)
     const p = String(calls[0].body.prompt)
     expect(p).toContain('Papel arriba. Motores abajo.')
-    expect(p).toContain('₡14.900')
+    // 0.26.0 (MCP): the copy has no price → the offer price is never added
+    expect(p).not.toContain('₡14.900')
     expect(p).toContain('hélices rojas')
     expect(calls[0].body.images.length).toBeGreaterThanOrEqual(2) // product + kit ref/logo
     expect(out.qa.logo).toBe('attached')
     expect(out.copySource).toBe('copy')
   })
 
-  it('falls back to the offer name + price when no copy is given, and says so', async () => {
+  it('falls back to the offer name when no copy is given (0.26.0: no price unless the copy has one), and says so', async () => {
     mockXai()
     const out = await generateWebStyleImage({ apiKey: 'k', ctx: CTX, offerId: 'off-1', aspectRatio: '9:16', productUrls: [ref(1)], compositeLayers: false })
     expect(out.copySource).toBe('offer_default')
-    expect(String(calls[0].body.prompt)).toContain('Avión Prototipo — ₡14.900')
+    expect(String(calls[0].body.prompt)).toContain('Avión Prototipo')
+    expect(String(calls[0].body.prompt)).not.toContain('₡14.900')
+  })
+
+  it('a price in the copy is kept (it is the only source of a price)', async () => {
+    mockXai()
+    await generateWebStyleImage({ apiKey: 'k', ctx: CTX, offerId: 'off-1', aspectRatio: '9:16', productUrls: [ref(1)], compositeLayers: false, copy: 'Armalo hoy\n₡14.900\nEscribinos por DM' })
+    expect(String(calls[0].body.prompt)).toContain('₡14.900')
   })
 })

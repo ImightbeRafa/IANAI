@@ -277,6 +277,7 @@ export interface ExactImageInput {
   cache?: BlobCache | null
   load?: ImageLoader
   variation?: number
+  /** 0.26.0: default 0 — no automatic paid plate retry. A caller may allow at most ONE (explicit autoRetry, disclosed and charged if it runs). */
   maxPlateRetries?: number
 }
 
@@ -298,6 +299,8 @@ export type ExactImageResult =
       placed: Buffer
       /** Halo / leftover-backdrop measurement of the composite (free, local). */
       halo: HaloReport
+      /** Plate generations that ran (1 = no retry). */
+      plateAttempts: number
     }
   | { ok: false; error: string; costUsd: number; warnings: string[] }
 
@@ -347,8 +350,10 @@ export async function generateExactProductImage(input: ExactImageInput): Promise
   let plateModel = ''
   let hint: string | undefined
   let lastCheck: PlateCheckResult | null = null
-  const attempts = 1 + Math.max(0, input.maxPlateRetries ?? 2)
+  const attempts = 1 + Math.max(0, Math.min(1, input.maxPlateRetries ?? 0))
+  let plateAttempts = 0
   for (let a = 0; a < attempts && !plateBytes; a++) {
+    plateAttempts++
     let plate
     try {
       plate = await generatePlate({ gateway: input.gateway, format: 'offer_graphic', dna, offer, placement: region, light, surface, variation: input.variation, allowedProps: input.allowedProps, ...(input.strictProps ? { strictProps: true } : {}), immutableAttributes: input.immutableAttributes, sceneBrief: input.sceneHint, draft: false, promptSuffix: hint, ratio: (isSupportedImageRatio(input.ratio) ? input.ratio : '9:16') as AspectRatio })
@@ -410,6 +415,7 @@ export async function generateExactProductImage(input: ExactImageInput): Promise
     productBox: p0.box,
     placed: p0.placed,
     halo,
+    plateAttempts,
   }
 }
 

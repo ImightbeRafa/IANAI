@@ -479,7 +479,7 @@ export async function dispatchAdPackTool(options: {
   offerStore?: McpOfferStore | null
   brandKitStore?: McpBrandKitStore | null
   rehost?: RehostFn | null
-  /** 0.26.0: assets for the preflight (approved-only refs + score before the quote). */
+  /** 0.26.0: assets for the preflight (score before the quote). */
   artifactStore?: McpArtifactStore | null
 }): Promise<Record<string, unknown>> {
   const { name, args, user, service } = options
@@ -563,7 +563,7 @@ export async function dispatchAdPackTool(options: {
         }
         // B2: corrections are written once, on the first call (the approved retry repeats the same arguments).
         const saved = approvalRequestId ? undefined : await persist()
-        // 0.26.0: preflight BEFORE the quote (saved-brand path): approved assets, offer essentials, brief. Low photo quality never blocks.
+        // 0.26.0: preflight BEFORE the quote (saved-brand path): product photo, offer name, brief (no price needed). Low photo quality never blocks.
         if (usesSavedBrand(args) && options.db && options.artifactStore) {
           const bctx = await mcpGetBrandContext(options.db, user, String(args.brandId))
           const pfOfferId = typeof args.offerId === 'string' && args.offerId ? args.offerId : bctx.offers[0]?.id
@@ -603,11 +603,12 @@ export async function dispatchAdPackTool(options: {
           input,
           approvalRequestId,
           plan,
-          summaryEs: `${quote.size} ${quote.size === 1 ? 'anuncio estático' : 'anuncios estáticos'}${vary.es}${target} · formatos ${ratios}`,
-          summaryEn: `${quote.size} static ${quote.size === 1 ? 'ad' : 'ads'}${vary.en}${target} · ratios ${ratios}`,
+          // 0.26.0: the one automatic retry per ad is disclosed as a possible extra charge (+1 image credit per ad, only if it runs).
+          summaryEs: `${quote.size} ${quote.size === 1 ? 'anuncio estático' : 'anuncios estáticos'}${vary.es}${target} · formatos ${ratios} · posible +${plan.unitCost} créditos por anuncio si su único reintento automático corre (solo se cobra si corre)`,
+          summaryEn: `${quote.size} static ${quote.size === 1 ? 'ad' : 'ads'}${vary.en}${target} · ratios ${ratios} · possible +${plan.unitCost} credits per ad if its one automatic retry runs (charged only if it runs)`,
           appOrigin: options.appOrigin,
           language: args.language === 'en' ? 'en' : undefined,
-          ...(quote.plan?.length ? { extra: { plan: quote.plan } } : {}),
+          extra: { ...(quote.plan?.length ? { plan: quote.plan } : {}), possibleExtraCredits: { perAd: plan.unitCost, max: plan.total, reason: 'one automatic retry per ad (scene re-run or ratio re-plate)', chargedOnlyIfRuns: true } },
         })
         if ('prompt' in gate) {
           return {

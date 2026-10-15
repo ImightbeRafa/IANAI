@@ -27,9 +27,9 @@ import { IMPORT_BATCH_MAX, IMPORT_KINDS, IMPORT_ROLES, mcpImportImage, mcpImport
 import { mcpCreateBrand, mcpSetDefaultOffer, mcpUpdateBrand, SALES_CHANNELS } from './brand-tools.js'
 import type { RemoteFetch } from './remote-image.js'
 import { createRehoster, type RehostFn } from './asset-rehost.js'
-import { ASSET_ROLES, effectiveAssetRole, isApproved, mcpSetAssetApproved, mcpSetAssetRole } from './asset-tools.js'
+import { ASSET_ROLES, effectiveAssetRole, mcpSetAssetRole } from './asset-tools.js'
 import { defaultGateDeps, preflightForOffer, preflightView } from './preflight.js'
-import { gateReferences, hammingHex, REFERENCE_GATE_CONFIG, verdictSummary, type ReferenceVerdict } from './reference-gate.js'
+import { storedVerdictSummary } from './reference-gate.js'
 import { PRODUCT_IMAGE_TAGS } from '../product-image-order.js'
 import { getMcpUrlContextStatus, saveMcpUrlContext, type McpUrlIntakeStore } from './url-intake.js'
 import { CreateAdsInputError, routeCreateAds } from './create-ads.js'
@@ -859,18 +859,6 @@ function toolInputSchema(name: string): Record<string, unknown> {
         required: ['productImageId', 'tags'],
         additionalProperties: false,
       }
-    case 'approve_asset':
-    case 'unapprove_asset':
-      return {
-        type: 'object',
-        properties: {
-          productImageId: { type: 'string', description: 'Asset id from list_assets (a real product / context photo; never a generated image).' },
-          brandId: { type: 'string' },
-          offerId: { type: 'string' },
-        },
-        required: ['productImageId'],
-        additionalProperties: false,
-      }
     case 'set_asset_role':
       return {
         type: 'object',
@@ -889,7 +877,7 @@ function toolInputSchema(name: string): Record<string, unknown> {
         properties: {
           ...brand,
           offerId: { type: 'string', description: 'Default: the brand default offer.' },
-          productImageId: { type: 'string', description: 'Hero photo you plan to use (optional: without ids the approved photos are picked automatically).' },
+          productImageId: { type: 'string', description: 'Hero photo you plan to use (optional: without ids the brand photos are picked automatically — hero + another angle / packaging + lifestyle).' },
           referenceImageIds: { type: 'array', items: { type: 'string' }, maxItems: 4 },
           productImageIds: { type: 'array', items: { type: 'string' }, maxItems: 8, description: 'Alias: photo pool (first = hero).' },
           copy: { type: 'string', maxLength: 1200 },
@@ -1687,11 +1675,6 @@ async function dispatchEnabledTool(options: {
       if (!options.offerStore) throw new Error('Offer store not configured')
       return mcpTagProductImage({ store: options.offerStore, user: options.user, args: options.args })
     }
-    case 'approve_asset':
-    case 'unapprove_asset': {
-      if (!options.offerStore) throw new Error('Offer store not configured')
-      return mcpSetAssetApproved({ store: options.offerStore, user: options.user, args: options.args, approved: options.name === 'approve_asset' })
-    }
     case 'set_asset_role': {
       if (!options.offerStore) throw new Error('Offer store not configured')
       return mcpSetAssetRole({ store: options.offerStore, user: options.user, args: options.args })
@@ -1751,27 +1734,23 @@ async function dispatchEnabledTool(options: {
       })
       // #20: audit the photo setup after import — role, tags, primary, quality, source link, label.
       const kitAssets = options.brandKitStore && !kind ? await listKitAssets(options.brandKitStore, options.user.id, brandId).catch(() => null) : null
-      // 0.26.0: role (product | b-roll | unboxing | lifestyle | packaging | logo), the owner's approval and the reference-gate verdict
-      // (free local checks + the cached vision verdict; never a paid call here). Duplicates point at the first copy.
-      const verdicts = new Map<string, ReferenceVerdict>()
-      for (const a of assets.filter((x) => x.kind !== 'generated').slice(0, 24)) {
-        const g = await gateReferences([{ id: a.id, url: a.imageUrl, quality: a.quality ?? null }]).catch(() => null)
-        const v = g?.accepted[0] ?? g?.rejected[0]
-        if (v) verdicts.set(a.id, v)
-      }
-      const firstByHash: Array<{ id: string; dhash: string }> = []
+      // 0.26.0: role (product | b-roll | unboxing | lifestyle | packaging | logo) and the reference-gate verdict from STORED data only
+      // (quality metrics + the cached gate verdict): a read tool never downloads images or calls a model. Identical files (same stored
+      // content hash) point at the first copy.
+      const firstByHash = new Map<string, string>()
       const duplicateOf = new Map<string, string>()
-      for (const [id, v] of verdicts) {
-        if (!v.dhash) continue
-        const hit = firstByHash.find((f) => hammingHex(f.dhash, v.dhash!) <= REFERENCE_GATE_CONFIG.DHASH_NEAR_DUP_BITS)
-        if (hit) duplicateOf.set(id, hit.id)
-        else firstByHash.push({ id, dhash: v.dhash })
+      for (const a of assets) {
+        const hash = (a.quality as { gate?: { hash?: string } } | null | undefined)?.gate?.hash
+        if (!hash || a.kind === 'generated') continue
+        const first = firstByHash.get(hash)
+        if (first) duplicateOf.set(a.id, first)
+        else firstByHash.set(hash, a.id)
       }
       return {
         brandId,
         offerId: typeof options.args.offerId === 'string' ? options.args.offerId : null,
         kind: kind || 'all',
-        approvalNote: 'Generation uses ONLY assets the brand owner approved (approve_asset, free). Low-quality photos are accepted with a warning and upscaled for free; only unreachable files / non-images are refused.',
+        referenceNote: 'Any real product / context photo can be a reference (no approval step). Low-quality photos are accepted with a warning and upscaled for free; only unreachable files / non-images are refused.',
         assets: assets.map((asset) => {
           const photoRole = asset.kind === 'product' ? (roleFromImageRow({ tags: asset.tags, is_primary: asset.isPrimary }) ?? roleFromLabel(asset.role ?? undefined) ?? roleFromLabel(asset.label ?? undefined) ?? null) : null
           return {
@@ -1790,8 +1769,7 @@ async function dispatchEnabledTool(options: {
             createdAt: asset.createdAt || null,
             assetRole: asset.kind === 'generated' ? null : effectiveAssetRole(asset),
             assetRoleExplicit: asset.assetRole ?? null,
-            approved: asset.kind === 'generated' ? false : isApproved(asset),
-            ...(verdicts.get(asset.id) ? { gate: verdictSummary(verdicts.get(asset.id)!) } : {}),
+            ...(asset.kind !== 'generated' ? { gate: storedVerdictSummary(asset.quality ?? null) } : {}),
             ...(duplicateOf.get(asset.id) ? { duplicateOf: duplicateOf.get(asset.id) } : {}),
           }
         }),
@@ -2111,6 +2089,7 @@ async function dispatchEnabledTool(options: {
         user: options.user,
         args: options.args,
         appOrigin: options.appOrigin,
+        offerStore: options.offerStore,
       })
     }
     case 'execute_campaign_pack': {
@@ -2123,6 +2102,7 @@ async function dispatchEnabledTool(options: {
         user: options.user,
         args: options.args,
         appOrigin: options.appOrigin,
+        offerStore: options.offerStore,
       })
     }
     case 'execute_image_edit': {

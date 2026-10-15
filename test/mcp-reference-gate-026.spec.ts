@@ -15,8 +15,8 @@ vi.mock('../api/lib/auth.js', () => ({
 vi.mock('../api/lib/usage-logger.js', () => ({ logApiUsage: vi.fn(async () => undefined), estimateTokens: vi.fn(() => 1) }))
 
 import { incrementUsage } from '../api/lib/auth.js'
-import { cachedVisionVerdict, dHash, estimateJpegQuality, gateReferences, hammingHex, inspectReferenceBytes, REFERENCE_GATE_CONFIG, type GateDeps } from '../api/lib/mcp/reference-gate'
-import { effectiveAssetRole, isApproved, mcpSetAssetApproved, mcpSetAssetRole, selectApprovedReferences } from '../api/lib/mcp/asset-tools'
+import { cachedVisionVerdict, estimateJpegQuality, gateReferences, inspectReferenceBytes, REFERENCE_GATE_CONFIG, storedVerdictSummary, type GateDeps } from '../api/lib/mcp/reference-gate'
+import { effectiveAssetRole, mcpSetAssetRole, selectReferences } from '../api/lib/mcp/asset-tools'
 import { runPreflight } from '../api/lib/mcp/preflight'
 import { upscaleLowResRefs } from '../api/lib/mcp/web-image'
 import { mcpExecuteImageGenerate } from '../api/lib/mcp/execute-tools'
@@ -46,7 +46,7 @@ async function photo(w: number, h: number, seed = 1, opts: { quality?: number; f
 
 describe('reference gate (each reason)', () => {
   it('one config object holds every threshold', () => {
-    expect(REFERENCE_GATE_CONFIG).toMatchObject({ MIN_LONG_SIDE: 1600, VERY_LOW_LONG_SIDE: 1080, PREFLIGHT_MIN_SCORE: 70 })
+    expect(REFERENCE_GATE_CONFIG).toMatchObject({ MIN_LONG_SIDE: 1600, VERY_LOW_LONG_SIDE: 1080, PREFLIGHT_MIN_SCORE: 70, DHASH_NEAR_DUP_BITS: 1 })
   })
 
   it('low resolution is ACCEPTED with a clear warning and the free upscale flag (< 1600; < 1080 = very low)', async () => {
@@ -110,15 +110,18 @@ describe('reference gate (each reason)', () => {
     expect(r.rejected[0].issues[0].severity).toBe('error')
   })
 
-  it('duplicates (same hash or dHash near-duplicate) are silently dropped', async () => {
+  it('duplicates: identical bytes are dropped; a resized / re-encoded shot or another angle is KEPT; the hero is never dropped', async () => {
     const a = await photo(1700, 1700, 9)
-    const nearDup = await sharp(a).resize(1650, 1650).jpeg({ quality: 80 }).toBuffer()
+    const reencoded = await sharp(a).resize(1650, 1650).jpeg({ quality: 80 }).toBuffer()
     const other = await photo(1700, 1700, 2)
-    expect(hammingHex(await dHash(a), await dHash(nearDup))).toBeLessThanOrEqual(REFERENCE_GATE_CONFIG.DHASH_NEAR_DUP_BITS)
-    const r = await gateReferences([{ id: 'a', url: durl(a) }, { id: 'a-copy', url: durl(a) }, { id: 'a-near', url: durl(nearDup) }, { id: 'b', url: durl(other) }])
+    const r = await gateReferences([{ id: 'a', url: durl(a) }, { id: 'a-copy', url: durl(a) }, { id: 'b', url: durl(other) }])
     expect(r.accepted.map((v) => v.id)).toEqual(['a', 'b'])
-    expect(r.deduped.map((d) => d.dropped)).toEqual(['a-copy', 'a-near'])
-    expect(r.rejected).toHaveLength(0)
+    expect(r.deduped).toEqual([{ dropped: 'a-copy', keptAs: 'a', distance: 0 }])
+    // strict threshold (≤ 1 bit): only near-identical pixels; a protected hero is never dropped even when identical
+    const p = await gateReferences([{ id: 'x', url: durl(a) }, { id: 'hero', url: durl(a), protect: true }])
+    expect(p.accepted.map((v) => v.id)).toEqual(['x', 'hero'])
+    const keep = await gateReferences([{ id: 'a', url: durl(a) }, { id: 'other-angle', url: durl(other) }, { id: 'a2', url: durl(reencoded) }])
+    expect(keep.accepted.map((v) => v.id)).toContain('other-angle')
   })
 
   it('low-resolution refs are upscaled for free before generation (deterministic, never redrawn)', async () => {
@@ -129,50 +132,69 @@ describe('reference gate (each reason)', () => {
     expect([meta.width, meta.height]).toEqual([1200, 1600])
     expect(out.urls[1].startsWith('data:image/jpeg')).toBe(true) // ≥ 1600: untouched
   })
+
+  it('list_assets view uses stored data only (no download): size from quality, cached vision flags', () => {
+    expect(storedVerdictSummary({ width: 900, height: 700 })).toMatchObject({ checked: true, upscale: true, issues: [{ code: 'very_low_resolution' }] })
+    expect(storedVerdictSummary({ gate: { hash: 'h', width: 2000, height: 1800, vision: { burnedInText: true, aiRender: false } } })).toMatchObject({ checked: true, upscale: false, contentHash: 'h', issues: [{ code: 'burned_in_text' }] })
+    expect(storedVerdictSummary(null)).toMatchObject({ checked: false })
+  })
+
+  it('a vision verdict never changes the ranking (deterministic between the quote and the approved call)', async () => {
+    const list: McpOwnedImage[] = [
+      { id: 'p1', imageUrl: durl(await photo(1700, 1700, 1)), offerId: 'o1', kind: 'product' },
+      { id: 'p2', imageUrl: durl(await photo(1800, 1800, 2)), offerId: 'o1', kind: 'product' },
+    ]
+    const flagged: GateDeps = { classify: async () => ({ verdict: { burnedInText: true, aiRender: true }, costUsd: 0, model: 'fake' }) }
+    const failing: GateDeps = { classify: async () => { throw new Error('vision down') } }
+    const picks = await Promise.all([flagged, failing].map(async (deps) => {
+      const g = await gateReferences(list.map((a) => ({ id: a.id, url: a.imageUrl })), deps)
+      return selectReferences({ assets: list, verdicts: new Map(g.accepted.map((v) => [v.id!, v])) }).picked.map((x) => x.id)
+    }))
+    expect(picks[0]).toEqual(picks[1])
+  })
 })
 
 async function assets(): Promise<McpOwnedImage[]> {
   return [
-    { id: 'hero', imageUrl: durl(await photo(1700, 1700, 1)), offerId: 'o1', kind: 'product', isPrimary: true, approved: true },
-    { id: 'pack', imageUrl: durl(await photo(1700, 1700, 2)), offerId: 'o1', kind: 'product', tags: ['caja'], approved: true },
-    { id: 'life', imageUrl: durl(await photo(1700, 1700, 3)), offerId: 'o1', kind: 'context', approved: true },
-    { id: 'raw', imageUrl: durl(await photo(1700, 1700, 4)), offerId: 'o1', kind: 'product', approved: false },
+    { id: 'hero', imageUrl: durl(await photo(1700, 1700, 1)), offerId: 'o1', kind: 'product', isPrimary: true },
+    { id: 'pack', imageUrl: durl(await photo(1700, 1700, 2)), offerId: 'o1', kind: 'product', tags: ['caja'] },
+    { id: 'life', imageUrl: durl(await photo(1700, 1700, 3)), offerId: 'o1', kind: 'context' },
   ]
 }
-const CTX = { offers: [{ id: 'o1', name: 'Sleeping Patches', price: '₡9.900', productDescription: 'Parches para dormir' }], brandKit: { id: 'k', name: 'K', logoUrl: 'https://x/logo.png', primaryColor: '#000', fontPrimary: 'Inter' } } as never
+const CTX = { offers: [{ id: 'o1', name: 'Sleeping Patches', productDescription: 'Parches para dormir' }], brandKit: { id: 'k', name: 'K', logoUrl: 'https://x/logo.png', primaryColor: '#000', fontPrimary: 'Inter' } } as never
 
-describe('asset roles + approved-only, varied selection', () => {
+describe('asset roles + varied selection (no approval step)', () => {
   it('roles: explicit asset_role wins; else box → packaging, context → lifestyle, product → product', () => {
     expect(effectiveAssetRole({ assetRole: 'unboxing', kind: 'product' })).toBe('unboxing')
     expect(effectiveAssetRole({ kind: 'product', tags: ['caja'] })).toBe('packaging')
     expect(effectiveAssetRole({ kind: 'context' })).toBe('lifestyle')
     expect(effectiveAssetRole({ kind: 'product', label: 'frente' })).toBe('product')
-    expect(isApproved({ approved: false })).toBe(false)
-    expect(isApproved({})).toBe(true) // a store without approval support (fakes)
+    expect(effectiveAssetRole({ kind: 'product', assetRole: null })).toBe('product') // missing 086 column = inferred
   })
 
-  it('automatic pick = hero product + packaging + lifestyle; never an unapproved asset', async () => {
-    const list = await assets()
-    const pre = await runPreflight({ ctx: CTX, offerId: 'o1', assets: list, copy: 'Dormí mejor\n₡9.900\nEscribinos por WhatsApp' })
+  it('automatic pick = hero product + packaging + lifestyle, from all the brand photos', async () => {
+    const pre = await runPreflight({ ctx: CTX, offerId: 'o1', assets: await assets(), copy: 'Dormí mejor\nEscribinos por WhatsApp' })
     expect(pre.selection.productIds).toEqual(['hero', 'pack'])
     expect(pre.selection.supportIds).toEqual(['life'])
-    expect([...pre.selection.productIds, ...pre.selection.supportIds]).not.toContain('raw')
     expect(pre.blocked).toBe(false)
-    expect(pre.score).toBe(100)
+    expect(pre.score).toBe(100) // no price anywhere: never penalised
   })
 
-  it('prefers the best-quality approved photo as hero when there is no primary', async () => {
+  it('prefers the best-quality photo as hero when there is no primary; a pack offer with only a box photo is not blocked', async () => {
     const list = (await assets()).map((a) => ({ ...a, isPrimary: false, tags: [] as string[] }))
     list[0] = { ...list[0], imageUrl: durl(await photo(800, 800, 1)) } // two product photos: the 1700 px one wins
     const verdicts = new Map((await gateReferences(list.map((a) => ({ id: a.id, url: a.imageUrl })))).accepted.map((v) => [v.id!, v]))
-    const sel = selectApprovedReferences({ assets: list, verdicts })
-    expect(sel.product[0].id).toBe('pack')
+    expect(selectReferences({ assets: list, verdicts }).product[0].id).toBe('pack')
+    const boxOnly: McpOwnedImage[] = [{ id: 'box', imageUrl: durl(await photo(1700, 1700, 5)), offerId: 'o1', kind: 'product', tags: ['caja'] }]
+    const pre = await runPreflight({ ctx: CTX, offerId: 'o1', assets: boxOnly, copy: 'Hola' })
+    expect(pre.selection.productIds).toEqual(['box'])
+    expect(pre.blocked).toBe(false)
   })
 })
 
 describe('preflight scoring and blocking', () => {
   it('low photo quality alone never blocks: warnings + a lower score, still ≥ 70', async () => {
-    const list = [{ id: 'tiny', imageUrl: durl(await photo(500, 500, 1, { quality: 15 })), offerId: 'o1', kind: 'product' as const, approved: true }]
+    const list = [{ id: 'tiny', imageUrl: durl(await photo(500, 500, 1, { quality: 15 })), offerId: 'o1', kind: 'product' as const }]
     const pre = await runPreflight({ ctx: { offers: CTX.offers, brandKit: null } as never, offerId: 'o1', assets: list, copy: 'Hola' })
     expect(pre.blocked).toBe(false)
     expect(pre.score).toBeGreaterThanOrEqual(70)
@@ -181,37 +203,36 @@ describe('preflight scoring and blocking', () => {
     expect(pre.items.find((i) => i.key === 'reference_quality')?.ok).toBe(false)
   })
 
-  it('missing essentials block (< 70) with an actionable message: no approved photo, no price', async () => {
-    const list = (await assets()).map((a) => ({ ...a, approved: false }))
-    const pre = await runPreflight({ ctx: { offers: [{ id: 'o1', name: 'X', productDescription: 'y' }], brandKit: null } as never, offerId: 'o1', assets: list })
-    expect(pre.blocked).toBe(true)
-    expect(pre.score).toBeLessThan(70)
-    expect(pre.missingEssentials).toEqual(['product_photo', 'price'])
-    expect(pre.message).toMatch(/approve_asset hero/)
-    expect(pre.message).toMatch(/update_offer \{price/)
-    const none = await runPreflight({ ctx: CTX, offerId: 'o1', assets: [] })
+  it('essentials = product photo, offer name, brief / copy — a missing price is never an item, never a block', async () => {
+    const pre = await runPreflight({ ctx: { offers: [{ id: 'o1', name: 'X' }], brandKit: null } as never, offerId: 'o1', assets: await assets(), copy: 'Hola' })
+    expect(pre.items.map((i) => i.key)).not.toContain('price')
+    expect(pre.items.filter((i) => i.essential).map((i) => i.key)).toEqual(['product_photo', 'offer_name', 'brief'])
+    expect(pre.blocked).toBe(false)
+    const none = await runPreflight({ ctx: { offers: [{ id: 'o1', name: '' }], brandKit: null } as never, offerId: 'o1', assets: [] })
     expect(none.blocked).toBe(true)
+    expect(none.score).toBeLessThan(70)
+    expect(none.missingEssentials).toEqual(['product_photo', 'offer_name', 'brief'])
     expect(none.message).toMatch(/import_image/)
     expect(none.message).toMatch(/1600 px/)
+    expect(none.message).not.toMatch(/approve_asset|price/)
   })
 
-  it('execute_image_generate refuses BEFORE any quote / approval / charge when no approved asset exists', async () => {
-    const list = (await assets()).map((a) => ({ ...a, approved: false }))
+  it('execute_image_generate refuses BEFORE any quote / approval / charge when no usable product photo exists', async () => {
     const db: McpDbClient = {
       async listBusinessesForUser() { return [{ id: 'b1', name: 'B' }] },
       async getBusinessForUser() { return { id: 'b1', name: 'B', userId: 'u1' } },
-      async listOffersForBrand() { return [{ id: 'o1', name: 'Sleeping Patches', price: '₡9.900' }] },
+      async listOffersForBrand() { return [{ id: 'o1', name: 'Sleeping Patches' }] },
       async getBrandKitForBrand() { return null },
     }
-    const artifactStore = { async listOwnedAssets() { return list }, async getOwnedProductImage(o: { imageId: string }) { return list.find((a) => a.id === o.imageId) ?? null } } as unknown as McpArtifactStore
-    const approvalStore = createMemoryMcpApprovalStore()
+    const dead: McpOwnedImage[] = [{ id: 'hero', imageUrl: durl(Buffer.from('not an image'), 'image/png'), offerId: 'o1', kind: 'product' }]
+    const artifactStore = { async listOwnedAssets() { return dead }, async getOwnedProductImage(o: { imageId: string }) { return dead.find((a) => a.id === o.imageId) ?? null } } as unknown as McpArtifactStore
     vi.mocked(incrementUsage).mockClear()
-    await expect(mcpExecuteImageGenerate({ db, approvalStore, artifactStore, user: { id: 'u1' }, args: { brandId: 'b1', offerId: 'o1', copy: 'Hola', productImageId: 'hero' } })).rejects.toThrow(/approve_asset hero/)
+    await expect(mcpExecuteImageGenerate({ db, approvalStore: createMemoryMcpApprovalStore(), artifactStore, user: { id: 'u1' }, args: { brandId: 'b1', offerId: 'o1', copy: 'Hola', productImageId: 'hero' } })).rejects.toThrow(/import_image/)
     expect(vi.mocked(incrementUsage)).not.toHaveBeenCalled()
   })
 })
 
-describe('approve_asset / unapprove_asset / set_asset_role (owner only, free)', () => {
+describe('set_asset_role (free) — no approval tools', () => {
   function store(over: Partial<McpOfferStore> = {}) {
     const patches: Array<Record<string, unknown>> = []
     const s = {
@@ -222,42 +243,31 @@ describe('approve_asset / unapprove_asset / set_asset_role (owner only, free)', 
     } as unknown as McpOfferStore
     return { s, patches }
   }
-  it('the owner approves (approved_at / approved_by set) and unapproves', async () => {
+  it('validates the six roles; missing 086 column → MIGRATION_PENDING (generation unaffected); other users refused', async () => {
     const { s, patches } = store()
-    const r = await mcpSetAssetApproved({ store: s, user: { id: 'owner' }, args: { productImageId: 'i1' }, approved: true })
-    expect((r.asset as { approved: boolean }).approved).toBe(true)
-    expect(patches[0]).toMatchObject({ approved: true, approved_by: 'owner' })
-    expect(typeof patches[0].approved_at).toBe('string')
-    await mcpSetAssetApproved({ store: s, user: { id: 'owner' }, args: { productImageId: 'i1' }, approved: false })
-    expect(patches[1]).toEqual({ approved: false, approved_at: null, approved_by: null })
-  })
-  it('anyone but the owner is refused; migration 086 pending → MIGRATION_PENDING; set_asset_role validates the six roles', async () => {
-    const { s } = store()
-    await expect(mcpSetAssetApproved({ store: s, user: { id: 'intruder' }, args: { productImageId: 'i1' }, approved: true })).rejects.toThrow(/Only the brand owner/)
-    const pending = store({ async updateProductImage() { throw Object.assign(new Error('column "approved" does not exist'), { code: '42703' }) } }).s
-    await expect(mcpSetAssetApproved({ store: pending, user: { id: 'owner' }, args: { productImageId: 'i1' }, approved: true })).rejects.toMatchObject({ code: 'MIGRATION_PENDING' })
     await expect(mcpSetAssetRole({ store: s, user: { id: 'owner' }, args: { productImageId: 'i1', assetRole: 'hero' } })).rejects.toThrow(/product, b-roll/)
     const ok = await mcpSetAssetRole({ store: s, user: { id: 'owner' }, args: { productImageId: 'i1', assetRole: 'lifestyle' } })
     expect((ok.asset as { assetRole: string }).assetRole).toBe('lifestyle')
+    expect(patches[0]).toEqual({ asset_role: 'lifestyle' })
+    await expect(mcpSetAssetRole({ store: s, user: { id: 'intruder' }, args: { productImageId: 'i1', assetRole: 'product' } })).rejects.toThrow(/not found/)
+    const pending = store({ async updateProductImage() { throw Object.assign(new Error('column "asset_role" does not exist'), { code: '42703' }) } }).s
+    await expect(mcpSetAssetRole({ store: pending, user: { id: 'owner' }, args: { productImageId: 'i1', assetRole: 'product' } })).rejects.toMatchObject({ code: 'MIGRATION_PENDING' })
   })
-  it('registered at 0.26.0: free, no approval; preflight tells the bot to call it first', () => {
+  it('registered at 0.26.0: approve_asset / unapprove_asset are gone; preflight tells the bot to call it first', () => {
     expect(MCP_REGISTRY_VERSION).toBe('0.26.0')
-    for (const name of ['approve_asset', 'unapprove_asset', 'set_asset_role', 'adpack_preflight']) expect(getMcpTool(name)).toMatchObject({ requiresApproval: false, consumesAdvanceCredits: false, enabled: true })
+    expect(getMcpTool('approve_asset')).toBeUndefined()
+    expect(getMcpTool('unapprove_asset')).toBeUndefined()
+    for (const name of ['set_asset_role', 'adpack_preflight']) expect(getMcpTool(name)).toMatchObject({ requiresApproval: false, consumesAdvanceCredits: false, enabled: true })
     expect(getMcpTool('adpack_preflight')?.description).toMatch(/CALL THIS FIRST/)
-    expect(getMcpTool('execute_image_generate')?.description).toMatch(/adpack_preflight/)
+    expect(getMcpTool('adpack_preflight')?.description).toMatch(/NOT required/)
+    expect(getMcpTool('execute_image_generate')?.description).toMatch(/charged ONLY if it actually runs/)
   })
 })
 
-describe('ad pack saved brand: only approved photos once migration 086 is applied', () => {
-  it('rows carrying `approved` → only approved ones are product refs (and never the legacy product columns)', async () => {
-    const { mapSavedBrand } = await import('../api/lib/adpack/saved-brand')
-    const images = [
-      { id: 'a', image_url: 'https://cdn.test/a.jpg', kind: 'product', approved: true, created_at: '2026-01-02' },
-      { id: 'b', image_url: 'https://cdn.test/b.jpg', kind: 'product', approved: false, created_at: '2026-01-03' },
-    ]
-    const out = mapSavedBrand({ business: { id: 'b1', name: 'Marca' }, kit: null, product: { id: 'o1', name: 'Kit', ind_product_images: ['https://cdn.test/legacy.jpg'] }, images, fetchedAt: '2026-01-01' })
-    expect(out.offer.productImageUrls).toEqual(['https://cdn.test/a.jpg'])
-    const legacy = mapSavedBrand({ business: { id: 'b1', name: 'Marca' }, kit: null, product: { id: 'o1', name: 'Kit' }, images: images.map(({ approved: _a, ...r }) => r), fetchedAt: '2026-01-01' })
-    expect(legacy.offer.productImageUrls?.length).toBe(2) // no approval column yet (pre-086 rows): unchanged; the MCP preflight fails closed instead
+describe('price only when the copy carries one', () => {
+  it('copyHasPrice', async () => {
+    const { copyHasPrice } = await import('../api/lib/mcp/web-image')
+    expect(copyHasPrice('Dormí mejor\n₡9.900\nEscribinos')).toBe(true)
+    expect(copyHasPrice('Dormí mejor\nEscribinos por WhatsApp')).toBe(false)
   })
 })

@@ -155,7 +155,7 @@ describe('ad pack parity: web handler vs MCP dispatch', () => {
     expect(mIngest.payload.dna).toEqual(wDna)
     expect(mDna2).toEqual(wDna2)
     expect(mAngles.payload.angles).toEqual((wAngles.body as { angles: unknown }).angles)
-    expect({ size: mQuote.payload.size, credits: mQuote.payload.credits, perAd: mQuote.payload.perAd, angleIds: mQuote.payload.angleIds, plan: mQuote.payload.plan, planHash: mQuote.payload.planHash }).toEqual(wQuote.body)
+    expect({ size: mQuote.payload.size, credits: mQuote.payload.credits, perAd: mQuote.payload.perAd, angleIds: mQuote.payload.angleIds, plan: mQuote.payload.plan, planHash: mQuote.payload.planHash, possibleExtraCredits: mQuote.payload.possibleExtraCredits }).toEqual(wQuote.body)
     expect((wQuote.body as { plan: unknown[] }).plan).toHaveLength(10)
     expect(wQuote.body).toMatchObject({ size: 10, credits: 10 * PER_AD, perAd: PER_AD })
     expect((wQuote.body as { angleIds: string[] }).angleIds).toHaveLength(10)

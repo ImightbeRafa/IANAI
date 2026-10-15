@@ -1,5 +1,5 @@
 import { supabase } from '../lib/supabase'
-import { BRAND_LOGO_MAX_DIM, BRAND_REFERENCE_MAX_DIM, compressBrandImage } from '../utils/imageCompression'
+import { BRAND_LOGO_MAX_DIM, compressBrandImage, compressBrandReferenceImage } from '../utils/imageCompression'
 
 export const CANONICAL_IMAGE_BUCKET = 'post-images'
 
@@ -52,14 +52,15 @@ export async function uploadBrandKitAsset(
   if (file.size > 10 * 1024 * 1024) {
     throw new Error('Image too large (max 10MB)')
   }
-  // MCP 0.26.0: reference images keep their full resolution (up to 4096 px, high quality) so they can pass the ≥ 1600 px
-  // reference rule (docs/mcp-quality.md); logos stay small.
-  const compressed = kind === 'logo'
-    ? await compressBrandImage(file, BRAND_LOGO_MAX_DIM, 0.85)
-    : await compressBrandImage(file, BRAND_REFERENCE_MAX_DIM, 0.95)
-  const path = `${session.user.id}/brand-kit/${kind === 'logo' ? 'logo' : 'ref'}-${Date.now()}.webp`
-  const upload = () => supabase.storage.from(CANONICAL_IMAGE_BUCKET).upload(path, compressed, {
-    contentType: 'image/webp',
+  // MCP 0.26.0: reference images keep up to 2560 px (WebP q0.9, JPEG q0.9 where WebP encoding is unsupported, size-checked) so they
+  // pass the ≥ 1600 px reference rule (docs/mcp-quality.md); logos stay small. SVG references keep the rasterising path.
+  const isSvg = file.type === 'image/svg+xml' || /\.svg$/i.test(file.name)
+  const encoded = kind === 'logo' || isSvg
+    ? { blob: await compressBrandImage(file, kind === 'logo' ? BRAND_LOGO_MAX_DIM : 2560, 0.85), contentType: 'image/webp', ext: 'webp' }
+    : await compressBrandReferenceImage(file)
+  const path = `${session.user.id}/brand-kit/${kind === 'logo' ? 'logo' : 'ref'}-${Date.now()}.${encoded.ext}`
+  const upload = () => supabase.storage.from(CANONICAL_IMAGE_BUCKET).upload(path, encoded.blob, {
+    contentType: encoded.contentType,
     upsert: false,
   })
   let { error } = await upload()

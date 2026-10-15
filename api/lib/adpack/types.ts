@@ -440,7 +440,8 @@ export interface AdAngle {
 
 export interface AdAutoRetry {
   count: number
-  history: Array<{ attempt: number; mode: 'copy' | 'scene'; error: string }>
+  /** copy = rewritten copy (text model only); scene / ratio_replate = one more paid image generation (+1 image credit when the ad ships). */
+  history: Array<{ attempt: number; mode: 'copy' | 'scene' | 'ratio_replate'; error: string }>
 }
 
 // ---------------------------------------------------------------------------

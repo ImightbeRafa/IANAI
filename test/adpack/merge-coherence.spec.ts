@@ -132,8 +132,8 @@ async function exactSetup(alter: (input: RenderInput, call: number) => boolean) 
   return { store, gateway, renderer, storage, charge, loadImage, advance: (extra: Partial<AdvancePackInput> = {}) => advancePack({ ...base, ...extra }), state: async () => (await store.getPack(PACK_ID, USER))! }
 }
 
-describe('per-ratio fidelity never consumes item retries', () => {
-  it('a rejected ratio is re-plated once AT that ratio and delivered — no item retry, charged once', async () => {
+describe('per-ratio re-plate = the ad\'s ONE automatic retry (0.26.0)', () => {
+  it('a rejected ratio is re-plated once AT that ratio and delivered — it counts as the ad\'s retry and is charged +1', async () => {
     // 9:16 fails on the shared plate (its first render) and passes on its own plate.
     let tall = 0
     const t = await exactSetup((input) => input.ratio === '9:16' && ++tall === 1)
@@ -143,21 +143,31 @@ describe('per-ratio fidelity never consumes item retries', () => {
     expect(item.renders.map((r) => r.ratio)).toEqual(['4:5', '9:16'])
     expect(item.renders[1].plateUrl).toMatch(/plate/)
     expect(item.rejectedRatios).toBeUndefined()
-    expect(item.angle.autoRetry).toBeUndefined()
+    expect(item.angle.autoRetry).toMatchObject({ count: 1, history: [{ mode: 'ratio_replate' }] })
     // Shared plate + one plate generated AT 9:16.
     expect(t.gateway.sceneCalls).toHaveLength(2)
     expect(t.gateway.sceneCalls.at(-1)!.ratio).toBe('9:16')
-    expect(t.charge.total()).toBe(1)
+    expect(t.charge.total()).toBe(2)
   })
 
-  it('a ratio that still fails after its re-plate is listed (item delivered with ≥ 1 ratio, no item retry)', async () => {
+  it('a ratio that still fails after its re-plate is listed (item delivered with ≥ 1 ratio; the re-plate ran, so +1)', async () => {
     const t = await exactSetup((input) => input.ratio === '9:16')
     await t.advance()
     const [item] = (await t.state()).items
     expect(item.status).toBe('done')
     expect(item.renders.map((r) => r.ratio)).toEqual(['4:5'])
     expect(item.rejectedRatios?.map((r) => r.ratio)).toEqual(['9:16'])
-    expect(item.angle.autoRetry).toBeUndefined()
+    expect(item.angle.autoRetry?.count).toBe(1)
+    expect(t.gateway.sceneCalls).toHaveLength(2)
+    expect(t.charge.total()).toBe(2)
+  })
+
+  it('maxAutoRetries 0: no re-plate, the ratio is listed, charged once', async () => {
+    const t = await exactSetup((input) => input.ratio === '9:16')
+    await t.advance({ maxAutoRetries: 0 })
+    const [item] = (await t.state()).items
+    expect(item.rejectedRatios?.map((r) => r.ratio)).toEqual(['9:16'])
+    expect(t.gateway.sceneCalls).toHaveLength(1)
     expect(t.charge.total()).toBe(1)
   })
 

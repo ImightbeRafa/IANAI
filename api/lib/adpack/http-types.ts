@@ -398,6 +398,8 @@ export interface AdPackQuote {
   credits: number
   /** Credits per ad (one `image_standard`, copy included; relighting included). */
   perAd: number
+  /** 0.26.0: at most +perAd per ad when that ad's ONE automatic retry re-runs a paid image generation — charged only if it runs. */
+  possibleExtraCredits?: { perAd: number; max: number; chargedOnlyIfRuns: true }
   /** Angle ids the quote covers (exactly `size` of them). */
   angleIds?: string[]
   /** Present when variations > 1. */
@@ -457,7 +459,7 @@ export interface AdPackItemView {
   fontsUsed?: FontsUsed
   /** #16: automatic retries used inside the approval (0–2) and why each earlier attempt failed. */
   autoRetries?: number
-  attemptLog?: Array<{ attempt: number; mode: 'copy' | 'scene'; error: string }>
+  attemptLog?: Array<{ attempt: number; mode: 'copy' | 'scene' | 'ratio_replate'; error: string }>
   charged: boolean
   /** product_images ids of renders saved to the offer library (kind 'generated'). */
   libraryImageIds?: string[]

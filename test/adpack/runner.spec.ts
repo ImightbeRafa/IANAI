@@ -96,7 +96,9 @@ describe('advancePack', () => {
     expect(failed.map((i) => i.index).sort()).toEqual([3, 6])
     for (const f of failed) {
       expect(f.error).toMatch(/^scene_failed/)
-      expect(f.sceneAttempts).toBe(3)
+      // 0.26.0: one scene attempt per run (no in-step paid retry); the ad's one automatic retry ran once
+      expect(f.sceneAttempts).toBe(1)
+      expect(f.angle.autoRetry?.count).toBe(1)
       expect(t.charge.counts.get(f.generationId)).toBeUndefined()
     }
     expect(t.charge.total()).toBe(8)
@@ -136,7 +138,7 @@ describe('advancePack', () => {
     }
   })
 
-  it('regenerates a scene when the product does not match the reference (≤ 2 retries)', async () => {
+  it('regenerates a scene ONCE when the product does not match the reference (the ad\'s one retry, +1 credit because it ran)', async () => {
     const t = await setup({
       size: 1,
       offer: { productImageUrls: [PRODUCT_REF] },
@@ -145,12 +147,12 @@ describe('advancePack', () => {
     await t.advance()
     const [item] = (await t.state()).items
     expect(item.status).toBe('done')
-    expect(item.sceneAttempts).toBe(2)
     expect(item.sceneCheck?.productMatches).toBe(true)
     expect(t.gateway.sceneCalls).toHaveLength(2)
     expect(t.gateway.sceneCalls[0].refs).toEqual([PRODUCT_REF])
-    expect(t.gateway.sceneCalls[1].prompt).toMatch(/previous attempt changed the product/)
+    expect(item.angle.autoRetry).toMatchObject({ count: 1, history: [{ attempt: 1, mode: 'scene' }] })
     expect(t.gateway.visionCalls[0].images).toHaveLength(2)
+    expect(t.charge.total()).toBe(2)
   })
 
   it('fails an item whose product never matches after 2 retries', async () => {
@@ -164,26 +166,26 @@ describe('advancePack', () => {
     const [item] = (await t.state()).items
     expect(item.status).toBe('failed')
     expect(item.error).toMatch(/scene_product_mismatch/)
-    // 3 scene attempts per run × (1 + 2 automatic retries inside the approval, #16).
-    expect(t.gateway.sceneCalls).toHaveLength(9)
-    expect(item.angle.autoRetry).toMatchObject({ count: 2, history: [{ attempt: 1, mode: 'scene' }, { attempt: 2, mode: 'scene' }] })
+    // 0.26.0: 1 scene attempt per run × (1 + the ad's ONE automatic retry). A failed ad is never charged.
+    expect(t.gateway.sceneCalls).toHaveLength(2)
+    expect(item.angle.autoRetry).toMatchObject({ count: 1, history: [{ attempt: 1, mode: 'scene' }] })
     expect(t.charge.total()).toBe(0)
   })
 
-  it('#16: a failed ad is retried automatically inside the approval, delivered and charged once', async () => {
+  it('#16: a failed ad is retried automatically ONCE inside the approval, delivered and charged +1 because the retry ran', async () => {
     let checks = 0
     const t = await setup({
       size: 1,
       offer: { productImageUrls: [PRODUCT_REF] },
-      // The first run's 3 scene checks reject the product; the automatic retry passes.
-      gateway: { vision: () => (++checks <= 3 ? { productMatches: false, strayText: false, score: 0.2 } : { productMatches: true, strayText: false, score: 0.9 }) },
+      // The first run's scene check rejects the product; the automatic retry passes.
+      gateway: { vision: () => (++checks <= 1 ? { productMatches: false, strayText: false, score: 0.2 } : { productMatches: true, strayText: false, score: 0.9 }) },
     })
     const progress = await t.advance()
     expect(progress.status).toBe('done')
     const [item] = (await t.state()).items
     expect(item.status).toBe('done')
     expect(item.angle.autoRetry).toMatchObject({ count: 1, history: [{ attempt: 1, mode: 'scene', error: expect.stringMatching(/^scene_product_mismatch/) }] })
-    expect(t.charge.total()).toBe(1)
+    expect(t.charge.total()).toBe(2)
     expect(t.charge.counts.get(item.generationId)).toBe(1)
   })
 
@@ -197,7 +199,7 @@ describe('advancePack', () => {
     const [item] = (await t.state()).items
     expect(item.status).toBe('failed')
     expect(item.angle.autoRetry).toBeUndefined()
-    expect(t.gateway.sceneCalls).toHaveLength(3)
+    expect(t.gateway.sceneCalls).toHaveLength(1)
   })
 
   it('charges each item exactly once across repeated and concurrent advance calls', async () => {

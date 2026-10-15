@@ -35,8 +35,8 @@ export function packFidelityDeprecatedNote(passed: 'exact' | 'generated'): strin
 /** 0.26.0: approval text for an explicit autoRetry:true (the one possible extra paid generation is disclosed before the user approves). */
 export function autoRetryDisclosure(language: 'es' | 'en' = 'es'): string {
   return language === 'en'
-    ? 'autoRetry: if the free quality check finds a defect, ONE extra paid generation may run (same job; its provider cost is logged; no extra credits are charged)'
-    : 'autoRetry: si el control de calidad gratuito encuentra un defecto, puede correr UNA generación paga extra (mismo trabajo; su costo de proveedor queda registrado; no se cobran créditos extra)'
+    ? 'autoRetry: if the free quality check finds a defect, ONE extra generation may run — possible +1 image credit, charged ONLY if the retry actually runs'
+    : 'autoRetry: si el control de calidad gratuito encuentra un defecto, puede correr UNA generación extra — posible +1 crédito de imagen, cobrado SOLO si el reintento corre'
 }
 
 /** Ledger entry (adpack gateway) → paid call row. */
@@ -50,6 +50,8 @@ export async function logPaidCalls(options: {
   generationId: string
   calls: PaidCall[]
   metadata: Record<string, unknown>
+  /** false when the job failed after the call ran (the cost is still real). */
+  success?: boolean
 }): Promise<void> {
   const calls = options.calls.length ? options.calls : []
   for (let i = 0; i < calls.length; i++) {
@@ -59,7 +61,7 @@ export async function logPaidCalls(options: {
       userEmail: options.user.email || undefined,
       feature: 'image',
       model: c.model,
-      success: true,
+      success: options.success !== false,
       costOverrideUsd: c.costUsd,
       generationId: options.generationId,
       source: 'mcp',
@@ -757,8 +759,8 @@ export async function mcpExecuteImageGenerate(options: {
     kind: 'product',
   })
   if (referenceMode === 'none') assertProductReferenceGate({ toolName: 'execute_image_generate', productRefCount: productAssets.length, referenceMode, referenceImageIds: selectedReferenceIds, productImageId })
-  // 0.26.0: reference gate + preflight BEFORE any quote / charge. Only APPROVED assets are used (confirmed ids, or an automatic varied
-  // pick: hero + another angle / packaging + lifestyle); low quality is a warning (free upscale later); a missing essential refuses here.
+  // 0.26.0: reference gate + preflight BEFORE any quote / charge. Refs = the confirmed ids, or an automatic varied
+  // pick of the brand photos: hero + another angle / packaging + lifestyle); low quality is a warning (free upscale later); a missing essential refuses here.
   const pre = await preflightForOffer({ artifactStore: options.artifactStore, userId: options.user.id, brandId, offerId, ctx: ctxPreview, confirmedIds: selectedReferenceIds, productImageId, copy: webArgs.copy, guidePrompt, scene: boundInput.scene, gate: defaultGateDeps({ user: options.user, offerStore: options.offerStore }) })
   if (pre.blocked) throw new PreflightBlockedError(preflightView(pre))
   const chosen = [...pre.selection.productIds, ...pre.selection.supportIds]
@@ -773,7 +775,7 @@ export async function mcpExecuteImageGenerate(options: {
     referenceImageIds: selectedReferenceIds,
     productImageId,
   })
-  const preflightNote = { score: pre.score, ...(pre.warnings.length ? { warnings: pre.warnings } : {}), ...(droppedRefs.length ? { droppedRefs: droppedRefs.map((id) => ({ id, reason: 'not approved, duplicate or unusable — not used' })) } : {}), selection: pre.selection }
+  const preflightNote = { score: pre.score, ...(pre.warnings.length ? { warnings: pre.warnings } : {}), ...(droppedRefs.length ? { droppedRefs: droppedRefs.map((id) => ({ id, reason: 'duplicate, unusable or over the 3-ref budget — not used' })) } : {}), selection: pre.selection }
   // Validate aspect early (fail before approval if unsupported). 1:1 / 4:5 / 9:16 / 16:9 always work (F3).
   resolveImageRatio(boundInput.aspectRatio)
   const pack = offerIsPack(ctxPreview, offerId, webArgs.productNotes)
@@ -793,7 +795,7 @@ export async function mcpExecuteImageGenerate(options: {
   if (!approvalRequestId) {
     const quote = quoteLegacyActionCredits('image', 'grok-imagine')
     // 0.26.0: an explicit autoRetry:true is disclosed in the approval text (one possible extra paid generation) before the user approves.
-    const retryNote: { summaryEs?: string; summaryEn?: string; extra?: Record<string, unknown> } = webArgs.autoRetry ? { summaryEs: `Generar una imagen con Advance · ${autoRetryDisclosure('es')}`, summaryEn: `Generate an image with Advance · ${autoRetryDisclosure('en')}`, extra: { possibleExtraGeneration: { count: 1, reason: 'autoRetry', extraCredits: 0, providerCostLogged: true } } } : {}
+    const retryNote: { summaryEs?: string; summaryEn?: string; extra?: Record<string, unknown> } = webArgs.autoRetry ? { summaryEs: `Generar una imagen con Advance · ${autoRetryDisclosure('es')}`, summaryEn: `Generate an image with Advance · ${autoRetryDisclosure('en')}`, extra: { possibleExtraGeneration: { count: 1, reason: 'autoRetry', extraCredits: quote, maxCredits: quote * 2, chargedOnlyIfRuns: true } } } : {}
     return issueMcpChatApproval({
       approvalStore: options.approvalStore,
       userId: options.user.id,
@@ -985,16 +987,24 @@ async function runImageGenerateBody(options: {
   let postCheck: Record<string, unknown> | null = null
   let rawSceneDataUrl: string | undefined
   let paidCalls: PaidCall[] = []
-  let generated: { imageDataUrl: string; providerModel: string; estimatedCostUsd: number; resolution: string; quality: string; aspectRatio: string; mode: string; lockApplied: boolean }
+  // Web path: every paid call is pushed here as it happens, so a job that fails after a paid call still logs it (catch below).
+  const paidSink: PaidCall[] = []
+  // 0.26.0: the ONE optional retry (explicit autoRetry:true) runs only if the user can afford +1 image credit; charged only if it runs.
+  const canAffordRetry = async () => options.autoRetry === true && (await checkUsageLimit(options.user.id, 'image', { imageModel: 'grok-imagine', units: 2 })).allowed
+  let retryRan = false
+  let generated!: { imageDataUrl: string; providerModel: string; estimatedCostUsd: number; resolution: string; quality: string; aspectRatio: string; mode: string; lockApplied: boolean }
+  try {
   if (fidelityMode === 'exact') {
     // Explicit opt-in: real product pixels on a generated plate (A1), then the same code layers (api/lib/mcp/exact-flow.ts). One run; every
     // paid call (plates, plate checks, segmentation) is recorded by the ledger and logged one row each.
     const offerName = options.ctxPreview.offers.find((o) => o.id === options.offerId)?.name || options.offerId
     const gateway = withCostLedger(createModelGateway())
+    const plateRetry = options.autoRetry === true && (await canAffordRetry().catch(() => false)) ? 1 : 0
     try {
       const exactAd = await generateExactWebStyleAd({
         exact: {
           gateway,
+          maxPlateRetries: plateRetry,
           photos: photosFromUrls(exactProductUrls),
           ratio: appliedAspectRatio,
           brandName: options.ctxPreview.brand.name,
@@ -1019,6 +1029,7 @@ async function runImageGenerateBody(options: {
       })
       fidelity = exactAd.fidelity
       rawSceneDataUrl = exactAd.rawSceneDataUrl
+      retryRan = exactAd.plateAttempts > 1
       generated = {
         imageDataUrl: exactAd.imageDataUrl,
         providerModel: exactAd.plateModel || 'grok-imagine',
@@ -1110,6 +1121,8 @@ async function runImageGenerateBody(options: {
       accessories,
       libraryPhotos,
       autoRetry: options.autoRetry,
+      canRetry: canAffordRetry,
+      paidCallsSink: paidSink,
       layoutCap: options.layoutCap,
       enforceSafeZones: options.enforceSafeZones,
       compositeLayers: options.compositeLayers,
@@ -1119,13 +1132,24 @@ async function runImageGenerateBody(options: {
     })
     generated = web.generated
     paidCalls = web.paidCalls
+    retryRan = web.autoRetry?.ran === true
     promptUsed = web.prompt
     postCheck = postCheckSummary(web)
     if (web.lockScope) postCheck = { ...postCheck, lockScope: web.lockScope }
     rawSceneDataUrl = web.rawScene?.imageDataUrl
   }
+  } catch (err) {
+    // A failed job still logs every paid provider call that ran (nothing is charged in credits: the job failed).
+    const ran = paidCalls.length ? paidCalls : paidSink
+    if (ran.length) {
+      await logPaidCalls({ user: options.user, generationId: imageGenerationId, calls: ran, success: false, metadata: { action: 'mcp_execute_image_generate', source: 'mcp', brandId: options.brandId, approvalRequestId: options.approvalRequestId, failed: true, error: err instanceof Error ? err.message.slice(0, 200) : 'error' } }).catch(() => undefined)
+    }
+    throw err
+  }
 
   const persistStarted = Date.now()
+  // Persisting can fail after the paid calls ran: they are logged anyway (catch), then the job fails (no credits charged).
+  const persist = async () => {
   const { sessionId } = await options.artifactStore.ensureExecuteSession({
     userId: options.user.id,
     brandId: options.brandId,
@@ -1158,6 +1182,12 @@ async function runImageGenerateBody(options: {
       .then((r) => ({ sceneUrl: r.imageUrl, finalUrl: saved.imageUrl }))
       .catch((err) => ({ finalUrl: saved.imageUrl, note: `raw scene not stored: ${err instanceof Error ? err.message.slice(0, 80) : 'error'}` }))
   } else if (rawSceneDataUrl) raw.note = 'raw scene not stored (store has no raw upload)'
+  return { sessionId, saved, raw }
+  }
+  const { sessionId, saved, raw } = await persist().catch(async (err: unknown) => {
+    await logPaidCalls({ user: options.user, generationId: imageGenerationId, calls: paidCalls.length ? paidCalls : [{ purpose: 'generate', provider: 'xai', model: generated.providerModel, costUsd: generated.estimatedCostUsd }], success: false, metadata: { action: 'mcp_execute_image_generate', source: 'mcp', brandId: options.brandId, approvalRequestId: options.approvalRequestId, failed: true, stage: 'persist', error: err instanceof Error ? err.message.slice(0, 200) : 'error' } }).catch(() => undefined)
+    throw err
+  })
 
   // One usage row per paid provider call (first generation, the optional retry, segmentation / plates / plate checks), each with its own cost.
   await logPaidCalls({
@@ -1177,19 +1207,23 @@ async function runImageGenerateBody(options: {
         quality: generated.quality,
         grokMode: generated.mode,
         lockApplied: generated.lockApplied,
-        chargedCredits: options.quote,
+        chargedCredits: options.quote * (retryRan ? 2 : 1),
+        ...(retryRan ? { autoRetryCharged: true } : {}),
         totalCostUsd: generated.estimatedCostUsd,
       },
     }),
   })
+  // The optional retry (autoRetry:true, disclosed as a possible +1 image credit) is charged only when it actually ran.
   const charged = await chargeMcpCredits({
     userId: options.user.id,
     action: 'image',
     generationId: imageGenerationId,
     imageModel: 'grok-imagine',
+    ...(retryRan ? { units: 2 } : {}),
   })
   if (!isCreditsV1Enabled()) {
     await deductBonusImage(options.user.id)
+    if (retryRan) await deductBonusImage(options.user.id)
   }
 
   const origin = (options.appOrigin || 'https://advanceai.studio').replace(/\/$/, '')
@@ -1224,6 +1258,7 @@ async function runImageGenerateBody(options: {
     prompt: promptUsed,
     deepLink: `${origin}/chat?brand=${encodeURIComponent(options.brandId)}&session=${encodeURIComponent(sessionId)}`,
     note: 'Image saved to Advance library as high-quality JPEG (HTTPS URL only — no blob in job result). Open deepLink to view in chat.',
+    autoRetryCharge: { possible: options.autoRetry === true, ran: retryRan, extraCredits: retryRan ? options.quote : 0 },
   }, charged, options.quote, 'execute_image_generate')
 }
 

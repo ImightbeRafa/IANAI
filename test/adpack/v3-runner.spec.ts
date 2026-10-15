@@ -68,7 +68,9 @@ describe('P0 #3 per-ratio fidelity: deliver what passes, list what does not', ()
     expect(item.rejectedRatios![0].fidelity.diffImageUrl).toMatch(/fidelity-9x16/)
     // The rejected render was never uploaded as a deliverable.
     expect(t.storage.uploads.some((u) => u.kind === 'render-9x16')).toBe(false)
-    expect(t.charge.total()).toBe(1)
+    // 0.26.0: the one automatic 9:16 re-plate ran (the ad's one retry) → +1 image credit with the ad
+    expect(item.angle.autoRetry).toMatchObject({ count: 1, history: [{ mode: 'ratio_replate' }] })
+    expect(t.charge.total()).toBe(2)
     // Persisted inside scene_check (no migration) and read back.
     const row = { id: item.id, pack_id: PACK_ID, item_index: 0, status: item.status, angle: item.angle, renders: item.renders, attempts: 0, generation_id: item.generationId, scene_check: item.sceneCheck }
     expect(rowToItem(row).rejectedRatios?.[0].ratio).toBe('9:16')
@@ -127,7 +129,8 @@ describe('P0 #3 per-ratio fidelity: deliver what passes, list what does not', ()
     expect(after.renders[0]).toEqual(keep)
     expect(after.renders[1].plateUrl).toMatch(/plate/)
     expect(after.rejectedRatios).toBeUndefined()
-    expect(t.charge.total()).toBe(1) // charged once, with the ad
+    // The user-requested regenerate is free; the 2nd credit is the automatic re-plate that ran during the pack (0.26.0)
+    expect(t.charge.total()).toBe(2)
 
     // Recomposite path: the same plate passes again (no model call).
     phase = 'recomposite'

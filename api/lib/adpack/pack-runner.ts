@@ -90,7 +90,11 @@ import type {
 /** Feed (4:5) + story (9:16) by default (H6); '1:1' stays available on request or via a free resize. */
 export const DEFAULT_RATIOS: AspectRatio[] = ['4:5', '9:16']
 export const ANCHOR_INDEX = 0
-export const MAX_SCENE_RETRIES = 2
+/**
+ * 0.26.0: no in-step paid scene / plate retry by default. The ONLY automatic retry is the item-level one (MAX_AUTO_RETRIES = 1 per ad
+ * in total, scene re-run, copy rewrite or one ratio re-plate), disclosed in the quote and charged +1 image credit only if it ran.
+ */
+export const MAX_SCENE_RETRIES = 0
 
 export { BLOCKING_COPY_CODES, EDIT_BLOCKING_COPY_CODES, MAX_COPY_REPAIR_ROUNDS } from './copy-stage.js'
 
@@ -353,7 +357,7 @@ export interface AdvancePackInput {
   cutoutCache?: BlobCache | null
   /** Fetch product photos / cut-outs (default: data URL or https fetch). Tests inject fakes. */
   loadImage?: ImageLoader
-  /** #16: automatic retries per failed ad (default MAX_AUTO_RETRIES = 2; 0 disables). */
+  /** #16: automatic retries per failed ad (default MAX_AUTO_RETRIES = 1 per ad in total; 0 disables). */
   maxAutoRetries?: number
   /** Exact mode: re-plate a rejected ratio once at that ratio before listing it (default true; false = list it directly). */
   ratioReplate?: boolean
@@ -480,8 +484,8 @@ async function release(ctx: RunCtx, item: PackItem): Promise<void> {
   ctx.known.set(item.id, { ...item, leaseUntil: undefined })
 }
 
-/** #16: automatic retries per ad inside the same approval before it is reported failed. */
-export const MAX_AUTO_RETRIES = 2
+/** #16: automatic retries per ad inside the same approval before it is reported failed. 0.26.0: ONE in total per ad (incl. a ratio re-plate). */
+export const MAX_AUTO_RETRIES = 1
 
 /**
  * Which failures are retried automatically, and how: copy failures write new copy (different
@@ -506,7 +510,8 @@ async function fail(ctx: RunCtx, item: PackItem, error: string, patch: Partial<P
   const used = angle.autoRetry?.count ?? 0
   const max = Math.max(0, ctx.input.maxAutoRetries ?? MAX_AUTO_RETRIES)
   if (mode && used < max && !item.chargedAt) {
-    // Same approval, same credits: nothing is charged for a failed attempt (only delivered ads are).
+    // Same approval: nothing is charged for a failed attempt; a delivered ad whose retry re-ran a paid image generation is charged +1 image
+    // credit (disclosed in the quote as possibleExtraCredits).
     // Order: the copy stage's free repair rounds already ran; this is the item-level retry (#16).
     const autoRetry = { count: used + 1, history: [...(angle.autoRetry?.history ?? []), { attempt: used + 1, mode, error: error.slice(0, 240) }] }
     const keepCopy = mode === 'scene' && Boolean(patch.copy ?? item.copy)
@@ -794,7 +799,8 @@ async function stepScene(ctx: RunCtx, item: PackItem, anchorUrl?: string): Promi
   let cost = 0
   let attempts = 0
   let lastError = ''
-  let hint: string | undefined
+  // 0.26.0: the ad's one automatic retry is corrective — it carries the hint for what failed last time.
+  let hint: string | undefined = retryHintFor(item, 'scene')
   const candidates: Array<{ scene: GeneratedScene; check: CheckSceneOutput | SceneCheckResult }> = []
 
   for (let a = 0; a < maxAttempts; a++) {
@@ -1048,7 +1054,7 @@ async function stepPlate(ctx: RunCtx, item: PackItem): Promise<PackItem> {
   let cost = 0
   let checkMs = 0
   let attempts = 0
-  let hint: string | undefined
+  let hint: string | undefined = retryHintFor(item, 'plate')
   let lastError = ''
   let accepted: { bytes: Uint8Array; mimeType: string; width: number; height: number; model: string; check: PlateCheckResult | null } | null = null
   let lastCheck: PlateCheckResult | null = null
@@ -1605,18 +1611,25 @@ async function stepRender(ctx: RunCtx, item: PackItem): Promise<PackItem> {
       return fail(ctx, item, `${prefix}${worst.reason} (${rejectedRatios.map((r) => r.ratio).join(', ')})`, { fidelity: worst.fidelity, sceneCheck, renders: [], rejectedRatios, timings })
     }
     // Fidelity order per ratio: AI relight → deterministic relight fallback (renderAllRatios) →
-    // one re-plate AT that ratio (here, free, no item retry used) → listed in rejectedRatios.
+    // 0.26.0: one re-plate AT that ratio ONLY if the ad has not used its one automatic retry; it then counts as that retry (+1 image
+    // credit when the ad ships) → otherwise listed in rejectedRatios.
     let renders = rendered.renders
     let rejectedNow = rejectedRatios
     let replateCost = 0
-    if (exactMode && exact && renders.length && rejectedNow.length && ctx.input.ratioReplate !== false && Date.now() < ctx.deadline) {
+    let retryAngle = item.angle
+    const retryBudget = Math.max(0, ctx.input.maxAutoRetries ?? MAX_AUTO_RETRIES) - (item.angle.autoRetry?.count ?? 0)
+    if (exactMode && exact && renders.length && rejectedNow.length && ctx.input.ratioReplate !== false && retryBudget > 0 && Date.now() < ctx.deadline) {
       const still: RejectedRatio[] = []
+      let replated = false
       for (const rj of rejectedNow) {
-        // A QA-gate rejection already tried the alternate layouts; a new plate does not fix it.
-        if (rj.qa || exact.bleed) {
+        // A QA-gate rejection already tried the alternate layouts; a new plate does not fix it. At most ONE re-plate (the ad's one retry).
+        if (rj.qa || exact.bleed || replated) {
           still.push(rj)
           continue
         }
+        replated = true
+        const used = item.angle.autoRetry?.count ?? 0
+        retryAngle = { ...item.angle, autoRetry: { count: used + 1, history: [...(item.angle.autoRetry?.history ?? []), { attempt: used + 1, mode: 'ratio_replate', error: `ratio ${rj.ratio}: ${rj.reason}`.slice(0, 240) }] } }
         try {
           const rp = await replateOneRatio({ gateway: ctx.input.gateway, renderer: ctx.input.renderer, storage: ctx.input.storage, pack: ctx.pack, item, copy: item.copy, exact, ratio: rj.ratio, maxPlateRetries: 0 })
           replateCost += rp.costUsd
@@ -1640,6 +1653,7 @@ async function stepRender(ctx: RunCtx, item: PackItem): Promise<PackItem> {
     // and can be regenerated alone (adpack_regenerate { ratio }, free).
     return save(ctx, item, {
       status: 'rendered',
+      ...(retryAngle !== item.angle ? { angle: retryAngle } : {}),
       renders,
       ...(finalFidelity ? { fidelity: finalFidelity, sceneCheck: finalCheck } : {}),
       rejectedRatios: rejectedNow.length ? rejectedNow : undefined,
@@ -1651,11 +1665,30 @@ async function stepRender(ctx: RunCtx, item: PackItem): Promise<PackItem> {
   return fail(ctx, item, `render_failed: ${lastError}`, { timings: { ...item.timings, renderMs: Date.now() - t0 } })
 }
 
+/** Corrective hint for the ad's automatic scene / plate retry, from the error that triggered it. */
+function retryHintFor(item: Pick<PackItem, 'angle'>, kind: 'scene' | 'plate'): string | undefined {
+  const last = item.angle.autoRetry?.history?.at(-1)
+  if (!last || last.mode !== 'scene') return undefined
+  const e = last.error
+  if (kind === 'plate') return /scene_props_failed/.test(e) ? PLATE_RETRY_HINT_PROPS : /placement/.test(e) ? PLATE_RETRY_HINT_PLACEMENT : undefined
+  if (/scene_product_mismatch/.test(e)) return RETRY_HINT_PRODUCT
+  if (/scene_props_failed/.test(e)) return RETRY_HINT_PROPS
+  if (/text/.test(e)) return RETRY_HINT_TEXT
+  return undefined
+}
+
+/** True when the ad's one automatic retry re-ran a paid image generation (charged +1 image credit when the ad ships). */
+export function paidRetryRan(item: Pick<PackItem, 'angle'>): boolean {
+  return (item.angle.autoRetry?.history ?? []).some((h) => h.mode === 'scene' || h.mode === 'ratio_replate')
+}
+
 async function stepCharge(ctx: RunCtx, item: PackItem): Promise<PackItem> {
   const t0 = Date.now()
   try {
-    // One charge per ad: relighting (deterministic or AI) is included.
+    // One charge per ad: relighting (deterministic or AI) is included. 0.26.0: + one image credit when the ad's one automatic retry
+    // re-ran a paid image generation (scene re-run or ratio re-plate); a copy rewrite is a text call only (not charged).
     await ctx.input.charge({ userId: ctx.pack.userId, generationId: item.generationId })
+    if (paidRetryRan(item)) await ctx.input.charge({ userId: ctx.pack.userId, generationId: deterministicGenerationUuid(item.generationId, 'adpack-auto-retry') })
   } catch (error) {
     return fail(ctx, item, `charge_failed: ${errorMessage(error)}`, { timings: { ...item.timings, chargeMs: Date.now() - t0 } })
   }

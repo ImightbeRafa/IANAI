@@ -48,7 +48,8 @@ import {
 } from './execute-job.js'
 import { assertMcpBulkCount } from './limits.js'
 import { assertProductReferenceGate, parseReferenceMode } from './reference-gate.js'
-import { approvedRefUrlsForBulk, defaultGateDeps } from './preflight.js'
+import { productRefUrlsForBulk, defaultGateDeps } from './preflight.js'
+import type { McpOfferStore } from './offer-tools.js'
 import { resolveImageRatio } from '../image-ratios.js'
 import { parseImageFidelityArgs } from '../adpack/fidelity/pipeline.js'
 import { mcpGetBrandContext, type McpAuthUser, type McpDbClient } from './user-tools.js'
@@ -699,6 +700,8 @@ export async function mcpExecuteBulkPosts(options: {
   user: McpAuthUser
   args: Record<string, unknown>
   appOrigin?: string
+  /** Persists the cached gate vision verdict (product_images.quality.gate). */
+  offerStore?: McpOfferStore | null
 }): Promise<Record<string, unknown>> {
   const args = await hydrateBulkApprovalArgs({
     approvalStore: options.approvalStore,
@@ -740,13 +743,13 @@ export async function mcpExecuteBulkPosts(options: {
     productImageId,
     referenceImageIds: confirmedRefIds,
   })
-  // 0.26.0: only APPROVED, gate-accepted refs (hero first); a missing essential refuses here, before the quote.
-  const approved = await approvedRefUrlsForBulk({ artifactStore: options.artifactStore, userId: options.user.id, brandId, offerId, ctx, confirmedIds: confirmedRefIds, productImageId, guidePrompt: typeof args.guidePrompt === 'string' ? args.guidePrompt : undefined, scene: typeof args.scene === 'string' ? args.scene : undefined, gate: defaultGateDeps({ user: options.user }) })
+  // 0.26.0: gate-accepted product refs (hero first); a missing essential refuses here, before the quote.
+  const refs = await productRefUrlsForBulk({ artifactStore: options.artifactStore, userId: options.user.id, brandId, offerId, ctx, confirmedIds: confirmedRefIds, productImageId, guidePrompt: typeof args.guidePrompt === 'string' ? args.guidePrompt : undefined, scene: typeof args.scene === 'string' ? args.scene : undefined, gate: defaultGateDeps({ user: options.user, offerStore: options.offerStore }) })
   const quote = quoteBulkPosts({
     count,
     imageModel,
     expandCount: referenceMode === 'none' ? 0 : countExpandNeeded(
-      approved.urls.length
+      refs.urls.length
     ),
   })
   const boundInput = {
@@ -766,7 +769,7 @@ export async function mcpExecuteBulkPosts(options: {
     referenceMode,
     referenceImageIds: confirmedRefIds,
     productImageId,
-    productRefUrls: approved.urls,
+    productRefUrls: refs.urls,
   }
   const approvalRequestId = typeof args.approvalRequestId === 'string'
     ? args.approvalRequestId
@@ -1279,6 +1282,8 @@ export async function mcpExecuteCampaignPack(options: {
   user: McpAuthUser
   args: Record<string, unknown>
   appOrigin?: string
+  /** Persists the cached gate vision verdict (product_images.quality.gate). */
+  offerStore?: McpOfferStore | null
 }): Promise<Record<string, unknown>> {
   const args = await hydrateBulkApprovalArgs({ approvalStore: options.approvalStore, userId: options.user.id, toolName: 'execute_campaign_pack', args: options.args })
   const brandId = typeof args.brandId === 'string' ? args.brandId : ''
@@ -1314,14 +1319,14 @@ export async function mcpExecuteCampaignPack(options: {
     productImageId,
     referenceImageIds: confirmedRefIds,
   })
-  // 0.26.0: only APPROVED, gate-accepted refs (hero first); a missing essential refuses here, before the quote.
-  const approved = await approvedRefUrlsForBulk({ artifactStore: options.artifactStore, userId: options.user.id, brandId, offerId, ctx, confirmedIds: confirmedRefIds, productImageId, guidePrompt: typeof args.guidePrompt === 'string' ? args.guidePrompt : undefined, scene: typeof args.scene === 'string' ? args.scene : undefined, gate: defaultGateDeps({ user: options.user }) })
+  // 0.26.0: gate-accepted product refs (hero first); a missing essential refuses here, before the quote.
+  const refs = await productRefUrlsForBulk({ artifactStore: options.artifactStore, userId: options.user.id, brandId, offerId, ctx, confirmedIds: confirmedRefIds, productImageId, guidePrompt: typeof args.guidePrompt === 'string' ? args.guidePrompt : undefined, scene: typeof args.scene === 'string' ? args.scene : undefined, gate: defaultGateDeps({ user: options.user, offerStore: options.offerStore }) })
   const quote = quoteCampaignPack({
     scriptCount: count,
     imageCount: count,
     imageModel,
     expandCount: referenceMode === 'none' ? 0 : countExpandNeeded(
-      approved.urls.length
+      refs.urls.length
     ),
   })
   const boundInput = {
@@ -1338,7 +1343,7 @@ export async function mcpExecuteCampaignPack(options: {
     referenceMode,
     referenceImageIds: confirmedRefIds,
     productImageId,
-    productRefUrls: approved.urls,
+    productRefUrls: refs.urls,
   }
   const approvalRequestId = typeof args.approvalRequestId === 'string' ? args.approvalRequestId : ''
   const pending = await requireOrIssueApproval({ approvalStore: options.approvalStore, approvalRequestId, userId: options.user.id, toolName: 'execute_campaign_pack', input: boundInput, quotedCreditCost: quote.totalCredits, appOrigin: options.appOrigin, language: boundInput.language, items: count })

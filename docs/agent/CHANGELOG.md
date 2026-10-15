@@ -1,3 +1,9 @@
+## 2026-10-15 — MCP 0.26.0 part D: no approval step, price never required, the one retry charged only if it runs, one automatic retry per ad everywhere
+
+**Area:** api (mcp, adpack, bulk), src (brand-kit upload), supabase (086 now OPTIONAL: asset_role only), docs.
+- **Owner decisions:** approval gating removed (`approve_asset` / `unapprove_asset`, the `approved` columns and the trigger are gone; any real photo of the brand can be a reference). Price is never required or scored; it is drawn only when the copy has one. `autoRetry:true` → possible +1 image credit in the approval, charged (`units: 2`) only if the retry ran; skipped when unaffordable.
+- **Review fixes:** exact pipeline `maxPlateRetries` default 0 (was 2); bulk passes 0; ad pack `MAX_SCENE_RETRIES` 0 and `MAX_AUTO_RETRIES` 1 (one retry per ad in total incl. a ratio re-plate, charged +1 when it ran, quote `possibleExtraCredits`); paid calls logged on failed jobs (execute image, persist failure, bulk); gate verdict cached on bulk / campaign (offerStore passed); ref ranking ignores the vision verdict (deterministic quote vs approval); hero falls back to packaging / unboxing; dedupe = identical bytes or dHash ≤ 1, hero protected; brand-kit refs ≤ 2560 px, JPEG fallback, size-checked; `list_assets` reads stored gate data only (no downloads).
+
 ## 2026-10-15 — MCP 0.26.0: the model designs the whole ad again (web parity), owner-approved references, reference gate, preflight
 
 **Area:** api (mcp, adpack, bulk), src (brand-kit upload), supabase (migration **086, NOT applied**), Dockerfile (tesseract removed), docs. No new env/secret/route/cron/npm dependency. Full write-up: `docs/mcp-quality.md`.

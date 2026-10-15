@@ -1221,6 +1221,7 @@ export function createAdPackService(deps: AdPackDeps): AdPackService {
       size,
       credits: q.credits,
       perAd: q.perAd,
+      possibleExtraCredits: { perAd: q.perAd, max: q.credits, chargedOnlyIfRuns: true },
       ...(opts.angleIds ? { angleIds: opts.angleIds } : {}),
       ...(variations > 1 ? { variations, angles: Math.round(size / variations) } : {}),
     }

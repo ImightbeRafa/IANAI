@@ -83,9 +83,7 @@ export function createSupabaseSavedBrandDb(client?: SupabaseClient | null): Save
         .order('created_at', { ascending: false })
         .limit(24)
       // 085 adds is_primary / tags / role / quality (ordering hints); older DBs fall back.
-      // 0.26.0: + 086 approved / asset_role (only approved assets are used for generation); older DBs fall back.
-      let { data, error } = await run('id, image_url, kind, label, message_id, created_at, is_primary, tags, role, quality, approved, asset_role')
-      if (error && isMissingColumnError(error)) ({ data, error } = await run('id, image_url, kind, label, message_id, created_at, is_primary, tags, role, quality'))
+      let { data, error } = await run('id, image_url, kind, label, message_id, created_at, is_primary, tags, role, quality')
       if (error && isMissingColumnError(error)) ({ data, error } = await run('id, image_url, kind, label, message_id, created_at'))
       if (error) throw error
       return (data || []) as unknown as Array<Record<string, unknown>>

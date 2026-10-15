@@ -411,9 +411,7 @@ export function mapSavedBrand(input: MapSavedBrandInput): { dna: BrandDna; offer
   notes.push(...factNotes.filter((n) => product || !n.startsWith('price')))
 
   // Product photos: real product refs first (primary → hero tag → sharpest → newest; then legacy refs), never generated; context → style refs.
-  // 0.26.0: once migration 086 is applied (rows carry `approved`), ONLY owner-approved photos are used — never the legacy product columns.
-  const approvalKnown = input.images.some((row) => 'approved' in row)
-  const usable = orderProductImages(input.images.filter((row) => isReusableProductReference(row as { kind?: string | null; message_id?: string | null }) && (!approvalKnown || row.approved === true)))
+  const usable = orderProductImages(input.images.filter((row) => isReusableProductReference(row as { kind?: string | null; message_id?: string | null })))
   const urlOf = (r: Row) => s(r, 'image_url', 1000)
   const byId = (ids: string[], label: string): string[] => ids.map((id) => {
     const row = usable.find((r) => r.id === id && r.kind !== 'context')
@@ -425,7 +423,7 @@ export function mapSavedBrand(input: MapSavedBrandInput): { dna: BrandDna; offer
     : httpsOnly(uniqStrings([
       ...usable.filter((r) => r.kind === 'product').map(urlOf),
       ...usable.filter((r) => r.kind !== 'product' && r.kind !== 'context').map(urlOf),
-      ...(approvalKnown ? [] : strings(product?.ind_product_images, 1000, 8)),
+      ...strings(product?.ind_product_images, 1000, 8),
     ], 8))
   const byAd: Record<string, string[]> = {}
   for (const [index, ids] of Object.entries(input.productImageIdsByAd ?? {})) {

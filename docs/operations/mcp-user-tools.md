@@ -37,18 +37,18 @@ Enabled tools now:
 
 **Offers + photos (sync write, no credits, 0.11):** `create_offer`, `update_offer`, `set_primary_product_image`, `tag_product_image`, `create_upload_url` → PUT → `finalize_upload`.
 
-**Assets (0.26.0, free, brand owner only):** `approve_asset`, `unapprove_asset`, `set_asset_role`; **`adpack_preflight`** (free read) — call it before any paid image tool.
+**Assets (0.26.0, free):** `set_asset_role` (optional; roles are inferred without it); **`adpack_preflight`** (free read) — call it before any paid image tool. No approval step.
 
-### 0.26.0 — the model designs the whole ad again, owner-approved references, reference gate, preflight
+### 0.26.0 — the model designs the whole ad again, reference gate, preflight, one paid retry at most
 
-Registry / server version **0.26.0**. **Migration 086 required before deploy** (`supabase/migrations/086_product_images_approved.sql`, not applied here); existing brands must approve their assets. Full write-up: `docs/mcp-quality.md`. Proofs: `test/mcp-quality-026.spec.ts`, `test/mcp-reference-gate-026.spec.ts`, `test/web-mcp-parity.spec.ts`.
+Registry / server version **0.26.0**. No migration required (`086_product_images_asset_role.sql` is optional, not applied here). Full write-up: `docs/mcp-quality.md`. Proofs: `test/mcp-quality-026.spec.ts`, `test/mcp-reference-gate-026.spec.ts`, `test/web-mcp-parity.spec.ts`.
 
-- `execute_image_generate` / `execute_bulk_posts` / `execute_campaign_pack`: the model designs the whole ad by default (copy in-image, kit logo as a reference, approved product photos under PRODUCT LOCK). `compositeLayers:true` (scene-only + code layout), `stampLogo`, `stampPrice`, `productFidelity:"exact"` (non-pack) and `enforceSafeZones` are explicit opt-ins.
-- Retries: none by default; `autoRetry:true` = at most one, disclosed in the approval (`possibleExtraGeneration`). No automatic exact fallback. Results carry `paidCalls`; every paid call is logged.
+- `execute_image_generate` / `execute_bulk_posts` / `execute_campaign_pack`: the model designs the whole ad by default (copy in-image, kit logo as a reference, the brand product photos under PRODUCT LOCK). `compositeLayers:true` (scene-only + code layout), `stampLogo`, `stampPrice`, `productFidelity:"exact"` (non-pack) and `enforceSafeZones` are explicit opt-ins.
+- Retries: none by default; `autoRetry:true` = at most one, shown in the approval as a possible +1 image credit (`possibleExtraGeneration`) and charged only if it ran (`autoRetryCharge`). Ad packs: one automatic retry per ad, `possibleExtraCredits` in the quote. No automatic exact fallback. Results carry `paidCalls`; every paid call is logged, also on failed jobs.
 - Printed packs: `productFidelity` ignored (`productFidelityNote`); `packSwap` reports the real-pixel swap. Fidelity is a warning only. Pack OCR removed.
-- Only APPROVED assets are used (confirmed ids or an automatic hero + angle / packaging + lifestyle pick). Low-quality photos are accepted with a warning (`preflight.warnings`) and upscaled for free (`upscaledRefs`); unreachable / non-image refs are refused before charging; duplicates are dropped.
-- `adpack_preflight` → `{score, blocked, items[], missingEssentials, warnings, selection, references}`; the execute tools and `adpack_start` refuse below 70 (code `PREFLIGHT_BLOCKED`) — only a missing essential (approved product photo, offer name, price, brief).
-- `list_assets`: `assetRole`, `approved`, `gate` (`issues[]` with ES/EN text), `duplicateOf`.
+- Refs = the confirmed ids or an automatic hero + angle / packaging + lifestyle pick of the brand photos (no approval step). A price is drawn only when the copy has one. Low-quality photos are accepted with a warning (`preflight.warnings`) and upscaled for free (`upscaledRefs`); unreachable / non-image refs are refused before charging; duplicates are dropped.
+- `adpack_preflight` → `{score, blocked, items[], missingEssentials, warnings, selection, references}`; the execute tools and `adpack_start` refuse below 70 (code `PREFLIGHT_BLOCKED`) — only a missing essential (product photo, offer name, brief / copy; never the price).
+- `list_assets`: `assetRole`, `gate` (stored data only: size + cached flags, `issues[]` with ES/EN text), `duplicateOf` (identical files).
 
 
 ### 0.25.0 — connected-only mask repair, strict-props exact fallback at the generated scale, CTA shrinks the picture, asset roles, fidelity vs the photo through the cache
@@ -295,7 +295,7 @@ Source: owner test 2026-10-08 (`advance-mcp-limitaciones-premium`), items F1, F2
 `workspace_save_url_context` inserts the intake and runs the analysis inline (`MCP_URL_INLINE_BUDGET_MS` = 25 s). Done → `ready` (analysis) / `failed`. Over budget → `processing` + `jobId` (work kept alive with `waitUntil`); `workspace_url_context_status {intakeId}` or `get_execute_result {jobId}` resolve it and re-run a pending / stale-lease intake inline (owner-scoped CAS claim by id, same lease guards as the cron). `wait:false` keeps the old queue-only behaviour. Cron config is unchanged.
 
 ### Migration needs (not applied here)
-- **0.26.0: `086_product_images_approved.sql` is REQUIRED before deploying 0.26.0** (`approved`, `approved_at`, `approved_by`, `asset_role` + owner-only trigger). Without it every asset reads as not approved and the image tools refuse before charging.
+- 0.26.0: `086_product_images_asset_role.sql` is OPTIONAL (`asset_role` for `set_asset_role`); without it roles are inferred and nothing blocks.
 - Otherwise none required. Optional later: `brand_kits.locale` + `brand_kits.forbidden_claims` to persist E2/E3 per brand (today they are per request / per pack via `pack.dna`).
 
 ## Operator step (required for Grok OAuth)

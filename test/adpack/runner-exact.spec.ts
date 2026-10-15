@@ -105,25 +105,27 @@ describe('exact product mode — pack runner (A1/A3/A4/H3)', () => {
     expect(failureReason(items[0].error, 'es')).toMatch(/recortar el producto/)
   })
 
-  it('props check: invented parts on the plate → retry (≤ 2) → accepted when clean', async () => {
-    const t = await setup({ size: 1, gateway: { vision: (i) => ({ extraObjects: i < 2 ? ['hélice suelta', 'cable USB'] : [], strayText: false, borders: false, placementClear: true, score: 0.8 }) } })
+  it('props check: invented parts on the plate → the ad\'s ONE retry (with the props hint) → accepted when clean, charged +1', async () => {
+    const t = await setup({ size: 1, gateway: { vision: (i) => ({ extraObjects: i < 1 ? ['hélice suelta', 'cable USB'] : [], strayText: false, borders: false, placementClear: true, score: 0.8 }) } })
     await t.advance()
     const { items } = await t.state()
     expect(items[0].status).toBe('done')
-    expect(items[0].sceneAttempts).toBe(3)
+    expect(t.gateway.sceneCalls).toHaveLength(2)
+    expect(items[0].angle.autoRetry?.count).toBe(1)
     expect(t.gateway.sceneCalls[1].prompt).toMatch(/look like a product, device, part, cable or packaging/)
+    expect(t.charge.total()).toBe(2)
   })
 
-  it('props check: still invented after 2 retries → scene_props_failed, nothing rendered or charged', async () => {
+  it('props check: still invented after the one retry → scene_props_failed, nothing rendered or charged', async () => {
     const t = await setup({ size: 1, gateway: { vision: () => ({ extraObjects: ['radiocontrol con antena'], strayText: false, borders: false, score: 0.7 }) } })
     await t.advance()
     const { items } = await t.state()
     expect(items[0].status).toBe('failed')
-    expect(items[0].error).toMatch(/^scene_props_failed: radiocontrol con antena \(after 3 attempts\)/)
+    expect(items[0].error).toMatch(/^scene_props_failed: radiocontrol con antena/)
     expect(items[0].sceneCheck?.extraObjects).toEqual(['radiocontrol con antena'])
-    // 3 plate attempts × (1 + 2 automatic re-plates inside the approval, #16).
-    expect(t.gateway.sceneCalls).toHaveLength(9)
-    expect(items[0].angle.autoRetry?.count).toBe(2)
+    // 0.26.0: 1 plate attempt × (1 + the ad's ONE automatic retry).
+    expect(t.gateway.sceneCalls).toHaveLength(2)
+    expect(items[0].angle.autoRetry?.count).toBe(1)
     expect(t.charge.total()).toBe(0)
   })
 

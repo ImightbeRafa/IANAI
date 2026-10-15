@@ -97,7 +97,7 @@ export interface AdPackFailureView {
   /** #16: attempts made inside the approval (1 + automatic retries) before reporting the failure. */
   attempts: number
   /** Why each automatic retry was needed (earlier attempts), oldest first. */
-  attemptLog?: Array<{ attempt: number; mode: 'copy' | 'scene'; error: string }>
+  attemptLog?: Array<{ attempt: number; mode: 'copy' | 'scene' | 'ratio_replate'; error: string }>
   /** Measured product fidelity when the ad failed on it (fidelity_failed). */
   fidelity?: AdPackFidelitySummary
   /** Copy failures: every blocking issue with field, sentence, offending tokens and the nearest fact. */
@@ -173,7 +173,7 @@ export interface AdPackDeliverableAd {
   /** #16: attempts it took inside the approval (1 = first try; credits are charged once). */
   attempts: number
   /** Why each automatic retry was needed (earlier attempts), oldest first. */
-  attemptLog?: Array<{ attempt: number; mode: 'copy' | 'scene'; error: string }>
+  attemptLog?: Array<{ attempt: number; mode: 'copy' | 'scene' | 'ratio_replate'; error: string }>
   /** #9: fonts actually drawn (heading, body, fallbacks). */
   fontsUsed?: FontsUsed
   /** Product fidelity (A4), worst ratio of the ad. */

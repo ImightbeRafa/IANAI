@@ -135,6 +135,15 @@ export function productRowFromOffer(offer: McpBrandContext['offers'][number] | u
   }
 }
 
+/** True when the copy the image is generated from carries a price (₡ 9.900, $12, "precio …"). */
+export function copyHasPrice(copy: string | null | undefined): boolean {
+  return Boolean(copy && PRICE_RE.test(copy))
+}
+
+function productRowWithoutPrice(row: ProductCreativeRow | null): ProductCreativeRow | null {
+  return row ? { ...row, offer: null, price_range: null } : row
+}
+
 export type WebStyleImageInput = {
   apiKey: string
   ctx: McpBrandContext
@@ -168,6 +177,10 @@ export type WebStyleImageInput = {
    * image. Never more than one extra paid generation; it is disclosed in the approval and its provider cost is logged.
    */
   autoRetry?: boolean
+  /** autoRetry:true only: checked right before the paid retry (e.g. the user can afford the +1 image credit). false → the retry is skipped. */
+  canRetry?: () => Promise<boolean>
+  /** Optional array the paid calls are pushed into as they run (logged by the caller even when generation throws later). */
+  paidCallsSink?: PaidCall[]
   /** Default true: condense a long copy to headline + 1 price line + 1 facts line + 1 CTA; the rest comes back as `copyOverflow` for the caption. */
   layoutCap?: boolean
   /** Legacy explicit opt-in (default false): scale the picture into a safe canvas when the QA finds text in the Instagram UI margins. */
@@ -227,7 +240,8 @@ export type WebStyleImageOutput = {
   fidelityCheck: FidelityCheckResult
   fidelity_warning?: FidelityWarning
   qa: McpImageQa
-  autoRetry: { requested: boolean; attempted: boolean; reason?: string; kept?: 'first' | 'retry'; keptReason?: string; firstSeverity?: number; retrySeverity?: number; factors?: { first: Record<string, number>; retry: Record<string, number> }; firstQa?: { safeZones: McpImageQa['safeZones']; textPresent: McpImageQa['textPresent']; issues: string[] } }
+  /** ran = the paid retry generation actually returned an image (it is charged +1 image credit); skipped = not run (e.g. not enough credits). */
+  autoRetry: { requested: boolean; attempted: boolean; ran?: boolean; skipped?: string; reason?: string; kept?: 'first' | 'retry'; keptReason?: string; firstSeverity?: number; retrySeverity?: number; factors?: { first: Record<string, number>; retry: Record<string, number> }; firstQa?: { safeZones: McpImageQa['safeZones']; textPresent: McpImageQa['textPresent']; issues: string[] } }
   references: { used: WebPostGrokImageResult['referencesUsed']; warnings: WebPostGrokImageResult['referenceWarnings'] }
   /** What was allowed in the scene. The local props heuristics run only on the compositeLayers opt-in. */
   propsPolicy: { forbidExtraProps: boolean; allowed: string[]; accessoryReferences: number; verifiedLocally: boolean; source: 'input' | 'none'; check?: ExtraObjectsFinding; unlisted?: Array<{ label: string; inliers: number }> }
@@ -385,7 +399,8 @@ export async function generateWebStyleImage(input: WebStyleImageInput): Promise<
     copySource = 'guidePrompt'
   }
   if (!copy) {
-    copy = [offer?.name, offer?.price].filter(Boolean).join(' — ')
+    // 0.26.0 (MCP): a price is used only when the script / copy carries one — the default copy is the offer name alone.
+    copy = withRules ? (offer?.name || '') : [offer?.name, offer?.price].filter(Boolean).join(' — ')
     copySource = 'offer_default'
   }
   // Orphan "·" guard: a long "a · b" line is split at the separator and stray separators are dropped.
@@ -441,7 +456,8 @@ export async function generateWebStyleImage(input: WebStyleImageInput): Promise<
     brandName: ctx.brand.name,
     brandKitId: kit?.id ?? null,
     offerId: input.offerId,
-    productRow: productRowFromOffer(offer),
+    // 0.26.0 (MCP): no "list price" line unless the copy itself has a price (the model never adds the offer price on its own).
+    productRow: withRules && !copyHasPrice(copy) ? productRowWithoutPrice(productRowFromOffer(offer)) : productRowFromOffer(offer),
     // Confirmed product photos only (0.26.0: the kit's reference images are never appended as product refs).
     productUrls: upscaled.urls,
     accessoryUrls: accessories.map((a) => a.imageUrl),
@@ -727,19 +743,23 @@ export async function generateWebStyleImage(input: WebStyleImageInput): Promise<
   }
   type Attempt = Awaited<ReturnType<typeof finishAttempt>>
 
-  const paidCalls: PaidCall[] = []
+  // Every paid call is pushed as it happens; the caller's sink (if any) is the same array, so a throw after a paid call still lets it log.
+  const paidCalls: PaidCall[] = input.paidCallsSink ?? []
   const autoRetry: WebStyleImageOutput['autoRetry'] = { requested: input.autoRetry === true, attempted: false }
   const firstGrok = await runWebPostGrokImage({ ...baseOptions, ...(withRules ? { mcp: mcpRules() } : {}) })
   paidCalls.push({ purpose: 'generate', provider: 'xai', model: firstGrok.providerModel, costUsd: firstGrok.estimatedCostUsd })
   let kept: Attempt = await finishAttempt(firstGrok, await reframe(firstGrok.imageDataUrl, firstGrok.aspectRatio))
   // At most ONE regeneration, and ONLY when the caller passed autoRetry:true explicitly (it is disclosed in the approval). Nothing forces one.
-  if (input.autoRetry === true && kept.decisionSeverity > 0) {
+  const retryAllowed = input.autoRetry === true && kept.decisionSeverity > 0 ? (input.canRetry ? await input.canRetry().catch(() => false) : true) : false
+  if (input.autoRetry === true && kept.decisionSeverity > 0 && !retryAllowed) autoRetry.skipped = 'insufficient_credits'
+  if (retryAllowed) {
     autoRetry.attempted = true
     autoRetry.reason = hint(kept.qa)
     autoRetry.firstQa = { safeZones: kept.qa.safeZones, textPresent: kept.qa.textPresent, issues: kept.qa.warnings.slice(0, 6) }
     try {
       const second = await runWebPostGrokImage({ ...baseOptions, ...(withRules ? { mcp: mcpRules(autoRetry.reason) } : {}) })
       paidCalls.push({ purpose: 'auto_retry', provider: 'xai', model: second.providerModel, costUsd: second.estimatedCostUsd })
+      autoRetry.ran = true
       const secondAttempt = await finishAttempt(second, await reframe(second.imageDataUrl, second.aspectRatio))
       autoRetry.firstSeverity = kept.decisionSeverity
       autoRetry.retrySeverity = secondAttempt.decisionSeverity

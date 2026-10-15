@@ -187,11 +187,14 @@ describe('execute_image_generate end to end', () => {
     expect(vi.mocked(incrementUsage)).toHaveBeenCalledTimes(1)
   })
 
-  it('autoRetry:true is disclosed in the approval; every paid call gets its own usage row with its own cost', async () => {
+  it('autoRetry:true is disclosed as a possible +1 image credit; it is charged (units 2) only because it ran; one usage row per paid call', async () => {
     images = [await ad(6), await ad(6)]
     const { first, status } = await run({ copy: 'Un regalo\nEscribinos por DM', autoRetry: true })
     expect(String(first.userPrompt)).toMatch(/autoRetry/)
-    expect(first.possibleExtraGeneration).toMatchObject({ count: 1 })
+    expect(String(first.userPrompt)).toMatch(/\+1 crédito de imagen|\+1 image credit/)
+    expect(first.possibleExtraGeneration).toMatchObject({ count: 1, extraCredits: 6, maxCredits: 12, chargedOnlyIfRuns: true })
+    expect(status.autoRetryCharge).toMatchObject({ possible: true, ran: true, extraCredits: 6 })
+    expect(vi.mocked(incrementUsage).mock.calls[0][2]).toMatchObject({ units: 2 })
     expect(xai).toHaveLength(2)
     const rows = vi.mocked(logApiUsage).mock.calls.map((c) => c[0])
     expect(rows).toHaveLength(2)
@@ -199,6 +202,43 @@ describe('execute_image_generate end to end', () => {
     for (const r of rows) expect(typeof r.costOverrideUsd).toBe('number')
     expect((status.paidCalls as unknown[]).length).toBe(2)
     expect(vi.mocked(incrementUsage)).toHaveBeenCalledTimes(1)
+  })
+
+  it('autoRetry:true but no defect (or not affordable): the retry does not run and is NOT charged', async () => {
+    images = [await ad(120)]
+    const { status } = await run({ copy: 'Un regalo\nEscribinos por DM', autoRetry: true })
+    expect(xai).toHaveLength(1)
+    expect(status.autoRetryCharge).toMatchObject({ possible: true, ran: false, extraCredits: 0 })
+    expect(vi.mocked(incrementUsage).mock.calls[0][2]?.units).toBeUndefined()
+    const { checkUsageLimit } = await import('../api/lib/auth.js')
+    vi.mocked(checkUsageLimit).mockImplementation(async (_u, _a, o) => ({ allowed: (o?.units ?? 1) < 2, remaining: 1, limit: 1 }))
+    xai = []
+    vi.mocked(incrementUsage).mockClear()
+    images = [await ad(6)]
+    const poor = await run({ copy: 'Un regalo\nEscribinos por DM', autoRetry: true })
+    expect(xai).toHaveLength(1)
+    expect(poor.status.autoRetry).toMatchObject({ attempted: false, skipped: 'insufficient_credits' })
+    expect(vi.mocked(incrementUsage).mock.calls[0][2]?.units).toBeUndefined()
+    vi.mocked(checkUsageLimit).mockImplementation(async () => ({ allowed: true, remaining: 99, limit: 99 }))
+  })
+
+  it('a job that fails after a paid call still logs that call (success:false) and charges nothing', async () => {
+    images = [await ad(120)]
+    const { db, artifactStore } = await setup()
+    ;(artifactStore as unknown as { saveImageArtifact: () => Promise<never> }).saveImageArtifact = async () => { throw new Error('storage down') }
+    const approvalStore = createMemoryMcpApprovalStore()
+    const work: Array<() => Promise<void>> = []
+    setMcpExecuteScheduler((w) => { work.push(w) })
+    const base = { db, approvalStore, artifactStore, user: { id: 'u1' } }
+    const a = { brandId: 'b1', offerId: 'o1', aspectRatio: '4:5', productImageId: 'p1', copy: 'Hola' }
+    const first = await mcpExecuteImageGenerate({ ...base, args: a })
+    await approveMcpApprovalRequest(approvalStore, { approvalRequestId: String(first.approvalRequestId), userId: 'u1' })
+    await mcpExecuteImageGenerate({ ...base, args: { ...a, approvalRequestId: String(first.approvalRequestId) } })
+    for (const w of work) await w().catch(() => undefined)
+    const rows = vi.mocked(logApiUsage).mock.calls.map((c) => c[0]).filter((r) => r.feature === 'image')
+    expect(rows).toHaveLength(1)
+    expect(rows[0]).toMatchObject({ success: false })
+    expect(vi.mocked(incrementUsage)).not.toHaveBeenCalled()
   })
 
   it('productNotes naming an accessory ("hélice", "cable") never turn an untagged hero into a part', async () => {

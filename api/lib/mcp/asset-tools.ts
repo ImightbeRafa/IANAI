@@ -1,11 +1,10 @@
 /**
- * MCP 0.26.0 — asset roles + the owner's `approved` flag (docs/mcp-quality.md, migration 086).
+ * MCP 0.26.0 — asset roles + varied reference selection (docs/mcp-quality.md).
  *
- *  - Roles: product | b-roll | unboxing | lifestyle | packaging | logo (product_images.asset_role). When a row has no explicit
- *    role it is inferred from the 085 role column / tags / label (inferAssetRole) and the kind (context → lifestyle).
- *  - `approved` is set ONLY by the brand owner (approve_asset / unapprove_asset; RLS enforces it in the database too).
- *    Generation uses ONLY approved assets. A store without the column at all (tests / fakes) reports approved = undefined and is
- *    treated as approved; the Supabase adapter reports false while migration 086 is pending (fail closed).
+ *  - Roles: product | b-roll | unboxing | lifestyle | packaging | logo (product_images.asset_role, optional migration 086). When a
+ *    row has no explicit role — or the column does not exist yet — it is inferred from the 085 role column / tags / label
+ *    (inferAssetRole) and the kind (context → lifestyle). A missing column is never a block.
+ *  - No approval step: every real product / context photo of the brand can be a reference (generated images never are).
  *  - Varied refs: hero product + one other angle / packaging + one lifestyle / b-roll context, best quality first, within the
  *    provider's 3-ref budget.
  */
@@ -18,7 +17,7 @@ import type { McpAuthUser } from './user-tools.js'
 
 export const ASSET_ROLES = ['product', 'b-roll', 'unboxing', 'lifestyle', 'packaging', 'logo'] as const
 export type AssetRole = (typeof ASSET_ROLES)[number]
-export const MIGRATION_086 = '086_product_images_approved.sql'
+export const MIGRATION_086 = '086_product_images_asset_role.sql'
 
 export function isAssetRole(v: unknown): v is AssetRole {
   return typeof v === 'string' && (ASSET_ROLES as readonly string[]).includes(v)
@@ -35,11 +34,6 @@ export function effectiveAssetRole(img: Pick<McpOwnedImage, 'assetRole' | 'kind'
   return 'product'
 }
 
-/** Approved by the owner. `undefined` = the store has no approval column at all (fakes / tests): treated as approved. */
-export function isApproved(img: Pick<McpOwnedImage, 'approved'>): boolean {
-  return img.approved !== false
-}
-
 export type ReferenceSelection = {
   /** Product refs (hero first): /images/edits PRODUCT LOCK. */
   product: McpOwnedImage[]
@@ -52,14 +46,16 @@ export type ReferenceSelection = {
 const qualityRank = (v: ReferenceVerdict | undefined): number => {
   if (!v) return 0
   const long = Math.max(v.width ?? 0, v.height ?? 0)
-  return Math.min(long, 4000) - 400 * v.issues.filter((i) => i.severity === 'warning' && i.code !== 'low_resolution' && i.code !== 'very_low_resolution').length
+  // Local, deterministic signals only (size + local compression / screenshot checks): a vision verdict that fails / differs between the
+  // quote call and the approved call can never change the selection (and so the bound input).
+  return Math.min(long, 4000) - 400 * v.issues.filter((i) => i.severity === 'warning' && i.source !== 'vision' && i.code !== 'low_resolution' && i.code !== 'very_low_resolution').length
 }
 
 /**
- * Approved, gate-accepted refs for one generation. `confirmedIds` (productImageId first) → exactly those (each must be approved);
- * none → automatic varied pick: hero product (primary first, then best quality) + another angle / packaging + a lifestyle / b-roll.
+ * Gate-accepted refs for one generation. `confirmedIds` (productImageId first) → exactly those; none → automatic varied pick:
+ * hero product (primary first, then best quality) + another angle / packaging + a lifestyle / b-roll.
  */
-export function selectApprovedReferences(input: {
+export function selectReferences(input: {
   assets: McpOwnedImage[]
   verdicts: Map<string, ReferenceVerdict>
   confirmedIds?: string[]
@@ -68,7 +64,7 @@ export function selectApprovedReferences(input: {
   max?: number
 }): ReferenceSelection {
   const max = input.max ?? 3
-  const usable = (a: McpOwnedImage) => isApproved(a) && a.kind !== 'generated' && input.verdicts.get(a.id)?.ok === true
+  const usable = (a: McpOwnedImage) => a.kind !== 'generated' && input.verdicts.get(a.id)?.ok === true
   const picked: ReferenceSelection['picked'] = []
   const product: McpOwnedImage[] = []
   const support: McpOwnedImage[] = []
@@ -86,9 +82,10 @@ export function selectApprovedReferences(input: {
     return { product, support, picked }
   }
   const pool = input.assets.filter(usable).sort((x, y) => Number(y.isPrimary === true) - Number(x.isPrimary === true) || qualityRank(input.verdicts.get(y.id)) - qualityRank(input.verdicts.get(x.id)))
-  const hero = pool.find((a) => effectiveAssetRole(a) === 'product')
+  // Packs: the box / pouch IS the product — packaging is a valid hero, then unboxing as the last resort.
+  const hero = pool.find((a) => effectiveAssetRole(a) === 'product') ?? pool.find((a) => effectiveAssetRole(a) === 'packaging') ?? pool.find((a) => effectiveAssetRole(a) === 'unboxing')
   if (!hero) return { product, support, picked }
-  place(hero, hero.isPrimary ? 'hero (primary photo)' : 'hero (best-quality approved product photo)')
+  place(hero, hero.isPrimary ? 'hero (primary photo)' : 'hero (best-quality product photo)')
   const second = pool.find((a) => a.id !== hero.id && (effectiveAssetRole(a) === 'product' || effectiveAssetRole(a) === 'packaging'))
   if (second && picked.length < max) place(second, effectiveAssetRole(second) === 'packaging' ? 'packaging' : 'another angle')
   const context = pool.find((a) => effectiveAssetRole(a) === 'lifestyle' || effectiveAssetRole(a) === 'b-roll')
@@ -99,91 +96,45 @@ export function selectApprovedReferences(input: {
 /** The actionable "what is missing" error (before any charge). */
 export function missingAssetsMessage(o: { assets: McpOwnedImage[]; verdicts: Map<string, ReferenceVerdict>; confirmedIds?: string[]; language?: 'es' | 'en' }): string {
   const es = o.language !== 'en'
-  const products = o.assets.filter((a) => a.kind !== 'generated' && effectiveAssetRole(a) === 'product')
-  const unapproved = products.filter((a) => !isApproved(a))
+  const products = o.assets.filter((a) => a.kind !== 'generated' && ['product', 'packaging', 'unboxing'].includes(effectiveAssetRole(a)))
   const broken = products.filter((a) => o.verdicts.get(a.id) && !o.verdicts.get(a.id)!.ok)
-  const notApprovedConfirmed = (o.confirmedIds ?? []).filter((id) => { const a = o.assets.find((x) => x.id === id); return a && !isApproved(a) })
   const unknown = (o.confirmedIds ?? []).filter((id) => !o.assets.some((x) => x.id === id))
   const min = REFERENCE_GATE_CONFIG.MIN_LONG_SIDE
-  const lines: string[] = [es ? 'No se cobró nada. Falta al menos 1 foto de producto APROBADA y descargable para generar.' : 'Nothing was charged. At least 1 APPROVED, downloadable product photo is needed to generate.']
-  if (notApprovedConfirmed.length) lines.push(es ? `Las fotos elegidas no están aprobadas: ${notApprovedConfirmed.map((id) => `approve_asset ${id}`).join(' · ')}` : `The selected photos are not approved: ${notApprovedConfirmed.map((id) => `approve_asset ${id}`).join(' · ')}`)
+  const lines: string[] = [es ? 'No se cobró nada. Falta al menos 1 foto de producto descargable para generar.' : 'Nothing was charged. At least 1 downloadable product photo is needed to generate.']
   if (unknown.length) lines.push(es ? `Ids desconocidos para esta marca: ${unknown.join(', ')} (usá list_assets).` : `Unknown ids for this brand: ${unknown.join(', ')} (use list_assets).`)
-  if (unapproved.length) lines.push(es ? `Fotos de producto sin aprobar (el dueño de la marca las aprueba, gratis): ${unapproved.slice(0, 8).map((a) => `approve_asset ${a.id}${a.label ? ` («${stripRolePrefix(a.label).slice(0, 40)}»)` : ''}`).join(' · ')}` : `Unapproved product photos (the brand owner approves them, free): ${unapproved.slice(0, 8).map((a) => `approve_asset ${a.id}${a.label ? ` ("${stripRolePrefix(a.label).slice(0, 40)}")` : ''}`).join(' · ')}`)
-  if (broken.length) lines.push(es ? `Fotos que no se pueden usar (no descargan o no son imagen): ${broken.map((a) => a.id).join(', ')} — volvé a importarlas (import_image).` : `Unusable photos (not downloadable / not an image): ${broken.map((a) => a.id).join(', ')} — re-import them (import_image).`)
-  if (!products.length) lines.push(es ? `Esta oferta no tiene fotos de producto: subí una foto real del producto de ≥ ${min} px en el lado largo (import_image {kind:"product_photo", role:"hero"}), luego approve_asset <id>.` : `This offer has no product photos: upload a real product photo of ≥ ${min} px on the long side (import_image {kind:"product_photo", role:"hero"}), then approve_asset <id>.`)
+  if (broken.length) lines.push(es ? `Fotos que no se pueden usar (no descargan o no son imagen): ${broken.map((a) => `${a.id}${a.label ? ` («${stripRolePrefix(a.label).slice(0, 40)}»)` : ''}`).join(', ')} — volvé a importarlas (import_image).` : `Unusable photos (not downloadable / not an image): ${broken.map((a) => a.id).join(', ')} — re-import them (import_image).`)
+  if (!products.length) lines.push(es ? `Esta oferta no tiene fotos de producto: subí una foto real del producto de ≥ ${min} px en el lado largo (import_image {kind:"product_photo", role:"hero"}).` : `This offer has no product photos: upload a real product photo of ≥ ${min} px on the long side (import_image {kind:"product_photo", role:"hero"}).`)
   else lines.push(es ? `Consejo: para mejores anuncios subí fotos de ≥ ${min} px, nítidas, sin texto sobreimpreso (las más chicas se aceptan con aviso).` : `Tip: for better ads upload sharp photos of ≥ ${min} px without burned-in text (smaller ones are accepted with a warning).`)
   return lines.join('\n')
 }
 
-export class MissingAssetsError extends Error {
-  readonly code = 'MISSING_ASSETS'
-}
-
 // ---------------------------------------------------------------------------
-// Tools (free; owner only)
+// set_asset_role (free, owner-scoped). Needs the optional migration 086 column; without it → MIGRATION_PENDING, generation unaffected.
 // ---------------------------------------------------------------------------
 
 type Row = Record<string, unknown>
 const str = (v: unknown) => (typeof v === 'string' ? v.trim() : '')
 
-async function ownerImage(store: McpOfferStore, user: McpAuthUser, args: Row): Promise<{ image: Row; offer: Row }> {
-  const imageId = str(args.productImageId) || str(args.assetId) || str(args.id)
-  if (!imageId) throw new Error('productImageId is required (from list_assets)')
-  const image = await store.getProductImage({ userId: user.id, imageId })
-  if (!image) throw new Error('Asset not found for this user')
-  // Owner only: getOfferById is owner-scoped (products.owner_id = user) — a team member / another user never resolves.
-  const offer = await store.getOfferById({ userId: user.id, offerId: String(image.product_id || '') })
-  if (!offer) throw new Error('Only the brand owner can change this asset (offer not owned by this user)')
-  if (args.brandId !== undefined && str(args.brandId) !== String(offer.business_id)) throw new Error('Asset not found for this brand')
-  return { image, offer }
-}
-
-function assetView(row: Row): Row {
-  return {
-    productImageId: row.id,
-    offerId: row.product_id,
-    imageUrl: row.image_url,
-    kind: row.kind ?? null,
-    assetRole: row.asset_role ?? null,
-    approved: row.approved === true,
-    approvedAt: row.approved_at ?? null,
-    label: row.label ?? null,
-  }
-}
-
-const isMissingApproval = (err: unknown) => isMissingColumnError(err)
-
-export async function mcpSetAssetApproved(options: { store: McpOfferStore; user: McpAuthUser; args: Row; approved: boolean }): Promise<Row> {
-  const { image } = await ownerImage(options.store, options.user, options.args)
-  if (image.kind === 'generated') throw new Error('Generated images cannot be approved as references: approve a real photo')
-  const patch: Row = options.approved
-    ? { approved: true, approved_at: new Date().toISOString(), approved_by: options.user.id }
-    : { approved: false, approved_at: null, approved_by: null }
-  let updated: Row
-  try {
-    updated = await options.store.updateProductImage({ userId: options.user.id, imageId: String(image.id), patch })
-  } catch (err) {
-    if (isMissingApproval(err)) throw new MigrationPendingError(options.approved ? 'approve_asset' : 'unapprove_asset', MIGRATION_086)
-    throw err
-  }
-  return {
-    status: 'updated',
-    asset: assetView(updated),
-    message: options.approved ? 'Approved: this asset can now be used as a reference for generation.' : 'Unapproved: this asset will not be used for generation.',
-    creditsNote: 'Free sync write — no Advance credits.',
-  }
-}
-
 export async function mcpSetAssetRole(options: { store: McpOfferStore; user: McpAuthUser; args: Row }): Promise<Row> {
   const role = options.args.assetRole ?? options.args.role
   if (role !== null && !isAssetRole(role)) throw new Error(`assetRole must be one of: ${ASSET_ROLES.join(', ')} (or null to infer it)`)
-  const { image } = await ownerImage(options.store, options.user, options.args)
+  const imageId = str(options.args.productImageId) || str(options.args.assetId) || str(options.args.id)
+  if (!imageId) throw new Error('productImageId is required (from list_assets)')
+  const image = await options.store.getProductImage({ userId: options.user.id, imageId })
+  if (!image) throw new Error('Asset not found for this user')
+  const offer = await options.store.getOfferById({ userId: options.user.id, offerId: String(image.product_id || '') })
+  if (!offer) throw new Error('Asset not found for this user')
+  if (options.args.brandId !== undefined && str(options.args.brandId) !== String(offer.business_id)) throw new Error('Asset not found for this brand')
   let updated: Row
   try {
     updated = await options.store.updateProductImage({ userId: options.user.id, imageId: String(image.id), patch: { asset_role: role ?? null } })
   } catch (err) {
-    if (isMissingApproval(err)) throw new MigrationPendingError('set_asset_role', MIGRATION_086)
+    if (isMissingColumnError(err)) throw new MigrationPendingError('set_asset_role', MIGRATION_086)
     throw err
   }
-  return { status: 'updated', asset: assetView(updated), creditsNote: 'Free sync write — no Advance credits.' }
+  return {
+    status: 'updated',
+    asset: { productImageId: updated.id, offerId: updated.product_id, kind: updated.kind ?? null, assetRole: updated.asset_role ?? null, label: updated.label ?? null },
+    creditsNote: 'Free sync write — no Advance credits.',
+  }
 }

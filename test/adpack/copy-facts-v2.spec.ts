@@ -258,11 +258,11 @@ describe('repair before failing (P0 #2b) with detailed issues (P0 #2c)', () => {
     await env.service.advance({ userId: USER_A, packId: started.packId })
     const status = await env.service.getStatus({ userId: USER_A, packId: started.packId })
     expect(status.status).toBe('failed')
-    // (generate + 2 free repair rounds) × (1 + 2 automatic item retries, #16): repair rounds run first.
-    expect(env.gateway.jsonCalls).toHaveLength(9)
+    // (generate + 2 free repair rounds) × (1 + the ad's ONE automatic retry, 0.26.0): repair rounds run first.
+    expect(env.gateway.jsonCalls).toHaveLength(6)
     expect(env.charges).toHaveLength(0)
     const failure = status.failures![0]
-    expect(failure).toMatchObject({ attempts: 3, attemptLog: [{ attempt: 1, mode: 'copy' }, { attempt: 2, mode: 'copy' }] })
+    expect(failure).toMatchObject({ attempts: 2, attemptLog: [{ attempt: 1, mode: 'copy' }] })
     expect(failure.reason).toMatch(/datos confirmados/)
     expect(failure.issues![0]).toMatchObject({ field: 'caption', rule: 'unconfirmed_fact', sentence: 'Envío gratis desde 3 kits.', nearestFactKey: 'shipping' })
     expect(failure.issues![0].offendingTokens).toContain('3 kit')

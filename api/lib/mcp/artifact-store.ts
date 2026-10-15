@@ -21,14 +21,8 @@ export type McpOwnedImage = {
   isPrimary?: boolean
   quality?: Record<string, unknown> | null
   sourceUrl?: string | null
-  /** 0.26.0 (migration 086): product | b-roll | unboxing | lifestyle | packaging | logo (null = inferred). */
+  /** 0.26.0 (optional migration 086): product | b-roll | unboxing | lifestyle | packaging | logo. null / missing column = inferred. */
   assetRole?: string | null
-  /**
-   * 0.26.0 (migration 086): set ONLY by the brand owner (approve_asset). Generation uses only approved assets.
-   * undefined = the store has no approval support at all (fakes); the Supabase adapter reports false while 086 is pending (fail closed).
-   */
-  approved?: boolean
-  approvedAt?: string | null
 }
 
 export type McpOwnedScript = {
@@ -485,8 +479,8 @@ export function createMcpArtifactStore(): McpArtifactStore | null {
         .eq('user_id', options.userId)
         .maybeSingle()
       const BASE_ONE = 'id, image_url, product_id, session_id, label, user_id, kind, created_at'
-      // 0.26.0: 086 approval / asset role + 085 role / tags / quality, falling back to the base columns (approved = false then).
-      let res = await one(`${BASE_ONE}, tags, role, is_primary, quality, source_url, asset_role, approved, approved_at`)
+      // 0.26.0: optional 086 asset_role + 085 role / tags / quality, falling back to the base columns (no role then).
+      let res = await one(`${BASE_ONE}, tags, role, is_primary, quality, source_url, asset_role`)
       if (res.error && isMissingColumnError(res.error)) res = await one(`${BASE_ONE}, tags, role, is_primary, quality, source_url`)
       if (res.error && isMissingColumnError(res.error)) res = await one(BASE_ONE)
       if (res.error) throw res.error
@@ -653,7 +647,7 @@ export function createMcpArtifactStore(): McpArtifactStore | null {
         return imageQuery.order('created_at', { ascending: false })
       }
       const BASE = 'id, image_url, product_id, session_id, label, kind, created_at'
-      let res = await run(`${BASE}, tags, role, is_primary, quality, source_url, asset_role, approved, approved_at`)
+      let res = await run(`${BASE}, tags, role, is_primary, quality, source_url, asset_role`)
       if (res.error && isMissingColumnError(res.error)) res = await run(`${BASE}, tags, role, is_primary, quality, source_url`)
       if (res.error && isMissingColumnError(res.error)) res = await run(BASE)
       if (res.error) throw res.error
@@ -720,7 +714,7 @@ export function createMcpArtifactStore(): McpArtifactStore | null {
   }
 }
 
-/** 085 / 086 product_images columns → McpOwnedImage fields. Missing 086 columns → approved:false (fail closed until migration 086). */
+/** 085 / 086 product_images columns → McpOwnedImage fields. A missing 086 asset_role column = no explicit role (inferred), never a block. */
 function extendedImageFields(row: Record<string, unknown>): Partial<McpOwnedImage> {
   return {
     ...('tags' in row ? { tags: Array.isArray(row.tags) ? (row.tags as string[]) : [] } : {}),
@@ -729,7 +723,5 @@ function extendedImageFields(row: Record<string, unknown>): Partial<McpOwnedImag
     ...('quality' in row ? { quality: (row.quality as Record<string, unknown> | null) ?? null } : {}),
     ...('source_url' in row ? { sourceUrl: (row.source_url as string | null) ?? null } : {}),
     assetRole: 'asset_role' in row ? ((row.asset_role as string | null) ?? null) : null,
-    approved: 'approved' in row ? row.approved === true : false,
-    approvedAt: 'approved_at' in row ? ((row.approved_at as string | null) ?? null) : null,
   }
 }

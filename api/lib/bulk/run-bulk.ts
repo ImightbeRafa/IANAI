@@ -293,6 +293,9 @@ export async function runBulkPosts(options: {
       })
       continue
     }
+    // Paid calls of this post, pushed as they run: a post that fails after a paid call still logs it (catch below).
+    const paidSink: PaidCall[] = []
+    let logged = false
     try {
       const prompt = [
         `Photoreal lifestyle ad still for ${runtime.ctx.brand.name}`,
@@ -327,8 +330,11 @@ export async function runBulkPosts(options: {
           allowedProps: runtime.allowedProps,
           ...(runtime.relight === 'ai' ? { relight: 'ai' as const } : {}),
           variation: absoluteIndex,
+          // 0.26.0: no automatic paid plate retry in bulk (no autoRetry here).
+          maxPlateRetries: 0,
         })
         paidCalls = ledgered.ledger.filter((e) => e.costUsd > 0).map((e) => ({ purpose: e.kind === 'segment' ? 'segment' as const : 'generate' as const, provider: e.kind === 'segment' || e.kind === 'visionJson' ? 'gemini' as const : 'xai' as const, model: e.model, costUsd: e.costUsd }))
+        paidSink.push(...paidCalls)
         if (!exact.ok) throw new Error(exact.error)
         fidelity = { score: exact.fidelity.score, passed: exact.fidelity.passed, method: exact.fidelity.method, ssim: exact.fidelity.ssim, deltaE: exact.fidelity.deltaE, silhouetteIoU: typeof exact.cutout.photoIoU === 'number' ? exact.cutout.photoIoU : exact.score.silhouetteIoU, silhouetteVs: typeof exact.cutout.photoIoU === 'number' ? 'photo' : 'cutout', cutoutIoU: exact.score.silhouetteIoU, ...(exact.cutout.maskRepaired ? { maskRepaired: true } : {}), hueShift: exact.score.hueShift }
         generated = { imageDataUrl: exactResultDataUrl(exact), providerModel: exact.plateModel || imageModel, estimatedCostUsd: exact.costUsd, resolution: `${exact.width}x${exact.height}`, quality: 'medium', mode: 'exact_composite', lockApplied: true }
@@ -351,6 +357,7 @@ export async function runBulkPosts(options: {
           ],
           productUrls: rotatedProduct.slice(0, 3),
           supportUrls: supportRefs.slice(0, 3),
+          paidCallsSink: paidSink,
         })
         generated = web.generated
         paidCalls = web.paidCalls
@@ -381,6 +388,7 @@ export async function runBulkPosts(options: {
       })
       // One usage row per paid provider call, each with its own cost (0.26.0).
       const calls: PaidCall[] = paidCalls.length ? paidCalls : [{ purpose: 'generate', provider: 'xai', model: generated.providerModel, costUsd: generated.estimatedCostUsd }]
+      logged = true
       for (let c = 0; c < calls.length; c++) {
         await logApiUsage({
           userId: runtime.user.id,
@@ -436,6 +444,22 @@ export async function runBulkPosts(options: {
         })
       }
     } catch (err) {
+      // A failed post still logs every paid call that ran (no credits charged).
+      if (!logged) {
+        for (let c = 0; c < paidSink.length; c++) {
+          await logApiUsage({
+            userId: runtime.user.id,
+            userEmail: runtime.user.email || undefined,
+            feature: 'image',
+            model: paidSink[c].model,
+            success: false,
+            costOverrideUsd: paidSink[c].costUsd,
+            generationId,
+            source: runtime.source,
+            metadata: { action: 'bulk_post', packId, angleId: angle.id, approach, failed: true, error: err instanceof Error ? err.message.slice(0, 200) : 'error', paidCall: { index: c + 1, of: paidSink.length, purpose: paidSink[c].purpose, provider: paidSink[c].provider } },
+          }).catch(() => undefined)
+        }
+      }
       items.push({
         angleId: angle.id,
         charged: 0,

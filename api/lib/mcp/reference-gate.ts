@@ -126,8 +126,12 @@ export const REFERENCE_GATE_CONFIG = {
   /** …or fewer compressed bytes per pixel than this (JPEG / WebP). */
   JPEG_MIN_BPP: 0.06,
   WEBP_MIN_BPP: 0.03,
-  /** dHash (64-bit) Hamming distance at or below which two refs of one request are the same photo (silently deduped). */
-  DHASH_NEAR_DUP_BITS: 5,
+  /**
+   * dHash (64-bit) Hamming distance at or below which two refs of one request are the same photo (silently deduped). Very strict (≤ 1):
+   * a real second angle must never be dropped; identical bytes (same sha256) are always duplicates. The first ref (hero) and any
+   * `protect`ed ref are never dropped.
+   */
+  DHASH_NEAR_DUP_BITS: 1,
   /** Preflight penalties of the reference-quality component (points, per photo; the component is capped). */
   PENALTY: { lowRes: 2, veryLowRes: 4, compression: 2, screenshot: 3, burnedInText: 3, aiRender: 3 },
   /** Preflight: execute tools / adpack_start refuse below this score. Only missing essentials can push a run below it. */
@@ -137,7 +141,8 @@ export const REFERENCE_GATE_CONFIG = {
 export type ReferenceIssueCode =
   | 'unreachable' | 'not_an_image'
   | 'low_resolution' | 'very_low_resolution' | 'heavy_compression' | 'screenshot' | 'burned_in_text' | 'ai_render'
-export type ReferenceIssue = { code: ReferenceIssueCode; severity: 'error' | 'warning'; es: string; en: string; detail?: Record<string, unknown> }
+/** source 'vision' = from the (paid, cached, best-effort) classifier — never used to RANK refs, so the selection is deterministic. */
+export type ReferenceIssue = { code: ReferenceIssueCode; severity: 'error' | 'warning'; es: string; en: string; detail?: Record<string, unknown>; source?: 'local' | 'vision' }
 
 /** Cached vision verdict, stored in product_images.quality.gate keyed by content hash (never paid twice). */
 export type ReferenceVisionVerdict = { burnedInText: boolean; aiRender: boolean; screenshot?: boolean; note?: string; model?: string; at?: string }
@@ -306,7 +311,8 @@ export function cachedVisionVerdict(quality: Record<string, unknown> | null | un
   return gate && contentHash && gate.hash === contentHash && gate.vision ? gate.vision : undefined
 }
 
-export type GateRef = { id?: string; url: string; quality?: Record<string, unknown> | null }
+/** protect: never dropped as a duplicate (the hero / primary photo). */
+export type GateRef = { id?: string; url: string; quality?: Record<string, unknown> | null; protect?: boolean }
 export type GateDeps = {
   /** Default: fetchPublicImageDetailed (data: URLs pass through). */
   load?: (url: string) => Promise<{ dataUrl: string } | { failure: { url: string; status?: number; reason: string } }>
@@ -350,7 +356,7 @@ export async function gateReferences(refs: GateRef[], deps: GateDeps = {}): Prom
     const bytes = new Uint8Array(Buffer.from(got.dataUrl.slice(got.dataUrl.indexOf(',') + 1), 'base64'))
     const v = await inspectReferenceBytes(bytes, ref.url, ref.id)
     if (!v.ok) { rejected.push(v); continue }
-    const dup = accepted.find((a) => a.contentHash === v.contentHash || (a.dhash && v.dhash && hammingHex(a.dhash, v.dhash) <= REFERENCE_GATE_CONFIG.DHASH_NEAR_DUP_BITS))
+    const dup = ref.protect ? undefined : accepted.find((a) => a.contentHash === v.contentHash || (a.dhash && v.dhash && hammingHex(a.dhash, v.dhash) <= REFERENCE_GATE_CONFIG.DHASH_NEAR_DUP_BITS))
     if (dup) {
       deduped.push({ dropped: v.id ?? v.url, keptAs: dup.id ?? dup.url, distance: dup.contentHash === v.contentHash ? 0 : hammingHex(dup.dhash!, v.dhash!) })
       continue
@@ -366,9 +372,9 @@ export async function gateReferences(refs: GateRef[], deps: GateDeps = {}): Prom
     }
     if (vision) {
       v.vision = vision
-      if (vision.burnedInText) v.issues.push({ code: 'burned_in_text', severity: 'warning', es: `${LOW_QUALITY_ES} (tiene texto o logo sobreimpreso: usá la foto limpia del producto)`, en: `${LOW_QUALITY_EN} (it has text or a logo burned in: use the clean product photo)` })
-      if (vision.aiRender) v.issues.push({ code: 'ai_render', severity: 'warning', es: `${LOW_QUALITY_ES} (parece un render de IA con texto falso: usá una foto real)`, en: `${LOW_QUALITY_EN} (looks like an AI render with fake text: use a real photo)` })
-      if (vision.screenshot && !v.issues.some((i) => i.code === 'screenshot')) v.issues.push({ code: 'screenshot', severity: 'warning', es: `${LOW_QUALITY_ES} (parece una captura de pantalla)`, en: `${LOW_QUALITY_EN} (looks like a screenshot)` })
+      if (vision.burnedInText) v.issues.push({ code: 'burned_in_text', source: 'vision', severity: 'warning', es: `${LOW_QUALITY_ES} (tiene texto o logo sobreimpreso: usá la foto limpia del producto)`, en: `${LOW_QUALITY_EN} (it has text or a logo burned in: use the clean product photo)` })
+      if (vision.aiRender) v.issues.push({ code: 'ai_render', source: 'vision', severity: 'warning', es: `${LOW_QUALITY_ES} (parece un render de IA con texto falso: usá una foto real)`, en: `${LOW_QUALITY_EN} (looks like an AI render with fake text: use a real photo)` })
+      if (vision.screenshot && !v.issues.some((i) => i.code === 'screenshot')) v.issues.push({ code: 'screenshot', source: 'vision', severity: 'warning', es: `${LOW_QUALITY_ES} (parece una captura de pantalla)`, en: `${LOW_QUALITY_EN} (looks like a screenshot)` })
     }
     accepted.push(v)
     bytesByUrl.set(ref.url, bytes)
@@ -386,4 +392,26 @@ export function verdictSummary(v: ReferenceVerdict): Record<string, unknown> {
     upscale: v.upscale,
     issues: v.issues.map((i) => ({ code: i.code, severity: i.severity, es: i.es, en: i.en })),
   }
+}
+
+/**
+ * list_assets view from STORED data only (no download, no model call): product_images.quality (085 import metrics: width / height)
+ * and the cached gate verdict (quality.gate: hash, size, vision flags). Unknown → { checked: false }.
+ */
+export function storedVerdictSummary(quality: Record<string, unknown> | null | undefined): Record<string, unknown> {
+  const q = quality && typeof quality === 'object' ? quality : {}
+  const gate = (q as { gate?: { hash?: string; width?: number; height?: number; vision?: ReferenceVisionVerdict } }).gate
+  const width = Number(gate?.width ?? (q as { width?: unknown }).width) || 0
+  const height = Number(gate?.height ?? (q as { height?: unknown }).height) || 0
+  const C = REFERENCE_GATE_CONFIG
+  const issues: Array<{ code: ReferenceIssueCode; severity: 'warning'; es: string; en: string }> = []
+  if (width && height && Math.max(width, height) < C.MIN_LONG_SIDE) {
+    const very = Math.max(width, height) < C.VERY_LOW_LONG_SIDE
+    issues.push({ code: very ? 'very_low_resolution' : 'low_resolution', severity: 'warning', es: `${LOW_QUALITY_ES} (${width}×${height} px; ideal ≥ ${C.MIN_LONG_SIDE} px)`, en: `${LOW_QUALITY_EN} (${width}×${height} px; ideal ≥ ${C.MIN_LONG_SIDE} px)` })
+  }
+  if (gate?.vision?.burnedInText) issues.push({ code: 'burned_in_text', severity: 'warning', es: `${LOW_QUALITY_ES} (texto o logo sobreimpreso)`, en: `${LOW_QUALITY_EN} (burned-in text or logo)` })
+  if (gate?.vision?.aiRender) issues.push({ code: 'ai_render', severity: 'warning', es: `${LOW_QUALITY_ES} (render de IA con texto falso)`, en: `${LOW_QUALITY_EN} (AI render with fake text)` })
+  if (gate?.vision?.screenshot) issues.push({ code: 'screenshot', severity: 'warning', es: `${LOW_QUALITY_ES} (captura de pantalla)`, en: `${LOW_QUALITY_EN} (screenshot)` })
+  if (!width && !gate) return { checked: false, note: 'not checked yet (checked for free before generation; adpack_preflight shows the full verdict)' }
+  return { checked: true, source: 'stored', ...(width ? { width, height } : {}), upscale: Boolean(width && Math.max(width, height) < C.MIN_LONG_SIDE), issues, ...(gate?.hash ? { contentHash: gate.hash } : {}) }
 }

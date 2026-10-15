@@ -358,9 +358,55 @@ async function rasterizeSvgFile(file: File, maxDim: number, quality: number): Pr
 export const BRAND_LOGO_MAX_DIM = 512
 /**
  * Brand-kit REFERENCE image uploads: long side cap (px). Was 1024, which made every reference fail the MCP ≥ 1600 px rule
- * (docs/mcp-quality.md); now near-full resolution, never upscaled.
+ * (docs/mcp-quality.md); 2560 keeps them well above it, never upscaled, and keeps files far under the bucket limit.
  */
-export const BRAND_REFERENCE_MAX_DIM = 4096
+export const BRAND_REFERENCE_MAX_DIM = 2560
+/** Upload cap for one brand-kit reference (bucket limit is 10 MB; keep a margin). */
+export const BRAND_REFERENCE_MAX_BYTES = 9 * 1024 * 1024
+
+function canvasToBlob(canvas: HTMLCanvasElement, type: string, quality: number): Promise<Blob | null> {
+  return new Promise((resolve) => canvas.toBlob((blob) => resolve(blob), type, quality))
+}
+
+/** Same pixels on white (JPEG has no alpha). */
+function onWhite(canvas: HTMLCanvasElement): HTMLCanvasElement {
+  const out = document.createElement('canvas')
+  out.width = canvas.width
+  out.height = canvas.height
+  const ctx = out.getContext('2d')
+  if (!ctx) return canvas
+  ctx.fillStyle = '#ffffff'
+  ctx.fillRect(0, 0, out.width, out.height)
+  ctx.drawImage(canvas, 0, 0)
+  return out
+}
+
+/**
+ * Brand-kit reference image: ≤ 2560 px, WebP q0.9 — or JPEG q0.9 where the browser cannot encode WebP (Safari returns a PNG
+ * instead, which can exceed the bucket limit). The output size is checked; a too-large result steps down (2048 px, q0.82) and
+ * otherwise fails with a clear message.
+ */
+export async function compressBrandReferenceImage(file: File): Promise<{ blob: Blob; contentType: 'image/webp' | 'image/jpeg'; ext: 'webp' | 'jpg' }> {
+  const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => {
+      const el = new Image()
+      el.onload = () => resolve(el)
+      el.onerror = () => reject(new Error('Could not read that image. Use PNG, JPG, WebP, or SVG.'))
+      el.src = reader.result as string
+    }
+    reader.onerror = () => reject(new Error('Failed to read file'))
+    reader.readAsDataURL(file)
+  })
+  for (const [dim, quality] of [[BRAND_REFERENCE_MAX_DIM, 0.9], [2048, 0.82]] as const) {
+    const canvas = drawScaledImage(img, dim)
+    const webp = await canvasToBlob(canvas, 'image/webp', quality)
+    if (webp && webp.type === 'image/webp' && webp.size <= BRAND_REFERENCE_MAX_BYTES) return { blob: webp, contentType: 'image/webp', ext: 'webp' }
+    const jpeg = await canvasToBlob(onWhite(canvas), 'image/jpeg', quality)
+    if (jpeg && jpeg.size <= BRAND_REFERENCE_MAX_BYTES) return { blob: jpeg, contentType: 'image/jpeg', ext: 'jpg' }
+  }
+  throw new Error('Image too large after compression (max 9 MB). Use a smaller photo.')
+}
 
 export async function compressBrandImage(
   file: File,

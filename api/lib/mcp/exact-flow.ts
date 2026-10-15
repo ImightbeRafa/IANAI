@@ -32,6 +32,8 @@ export type ExactAdOutput = {
   height: number
   costUsd: number
   plateModel: string
+  /** Plate generations that ran (2 = the one optional retry ran → +1 image credit). */
+  plateAttempts: number
   fidelity: Record<string, unknown>
   qa: McpImageQa
   halo: HaloReport & { edgeRoughness: number | null }
@@ -74,18 +76,20 @@ export async function generateExactWebStyleAd(input: {
   /** Test seam: replaces the paid plate + composite call. */
   exactRunner?: (i: ExactImageInput) => Promise<ExactImageResult>
 }): Promise<ExactAdOutput> {
-  // 0.26.0: ONE run. The whole paid pipeline (plates + plate checks) is never re-run by a provider retry — provider retries live on
-  // single HTTP calls only — and the caller logs every paid call from the gateway ledger.
+  // 0.26.0: the whole paid pipeline is never re-run by a provider retry (provider retries live on single HTTP calls only). Inside it,
+  // ONE plate generation by default; `exact.maxPlateRetries: 1` (explicit autoRetry, disclosed and charged +1 if it runs) allows one
+  // more plate. The caller logs every paid call from the gateway ledger — also when this throws.
   const run = input.exactRunner ?? generateExactProductImage
   const exact = await run(input.exact)
   if (!exact.ok) throw new Error(exact.error)
 
   const offer = input.ctx.offers.find((o) => o.id === input.offerId)
   const kit = input.ctx.brandKit
-  let copy = (input.copy || '').trim() || (input.guidePrompt || '').trim() || [offer?.name, offer?.price].filter(Boolean).join('\n')
+  // 0.26.0: a price only when the copy carries one — the fallback copy is the offer name alone.
+  let copy = (input.copy || '').trim() || (input.guidePrompt || '').trim() || (offer?.name || '')
   // Round 8: banned wording (kit forbiddenPhrases + built-in regulated claims) never reaches the code-rendered copy
   const scrubbed = scrubCopy(copy, kit?.forbiddenPhrases ?? [])
-  if (scrubbed.removed.length) copy = scrubbed.text || [offer?.name, offer?.price].filter(Boolean).join('\n')
+  if (scrubbed.removed.length) copy = scrubbed.text || (offer?.name || '')
   const removedClaims = uniqueClaims(scrubbed.removed)
   copy = tidyCopySeparators(copy).copy
   const capped = input.layoutCap === false ? null : capCopyBlocks(copy)
@@ -175,6 +179,7 @@ export async function generateExactWebStyleAd(input: {
     height: report.height,
     costUsd: exact.costUsd,
     plateModel: exact.plateModel,
+    plateAttempts: exact.plateAttempts ?? 1,
     fidelity: { score: exact.fidelity.score, passed: exact.fidelity.passed, method: exact.fidelity.method, ssim: exact.fidelity.ssim, deltaE: exact.fidelity.deltaE, silhouetteIoU: typeof exact.cutout.photoIoU === 'number' ? exact.cutout.photoIoU : exact.score.silhouetteIoU, silhouetteVs: typeof exact.cutout.photoIoU === 'number' ? 'photo' : 'cutout', cutoutIoU: exact.score.silhouetteIoU, ...(exact.cutout.maskRepaired ? { maskRepaired: true } : {}), hueShift: exact.score.hueShift },
     qa,
     halo,
