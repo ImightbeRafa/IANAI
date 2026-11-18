@@ -2,7 +2,8 @@ import { fileURLToPath } from 'node:url'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
-import { CRON_PATHS, handleFetch, handleScheduled, type WorkerEnv } from '../cf/worker-core'
+import { handleFetch, type WorkerEnv } from '../cf/worker-core'
+import worker from '../src/cf-container-worker'
 import { CONTAINER_ENV_KEYS, getContainerEnvVars } from '../cf/container-env.mjs'
 import { cronsEnabled } from '../api/lib/crons-enabled'
 import { parseJsonc, scanProcessEnvNames } from '../scripts/parity/lib.mjs'
@@ -47,102 +48,6 @@ describe('cronsEnabled (fail closed)', () => {
     for (const [, value, expected] of CRONS_ENABLED_TRUTH_TABLE) {
       expect(cronsEnabled({ APP_ENV: 'preview', ENABLE_CRONS: value })).toBe(expected)
     }
-  })
-})
-
-describe('handleScheduled', () => {
-  const env = (extra: Record<string, unknown> = {}): WorkerEnv =>
-    ({ ASSETS: { fetch: vi.fn() }, ...extra }) as WorkerEnv
-
-  // Gate truth table: every value here must be a no-op (0 container calls).
-  // Only a value cronsEnabled() treats as true may ever reach the
-  // container. This is the fail-closed guarantee SD-01 requires — a
-  // truthy-but-wrong string like 'true' must never enable the preview
-  // cron. Uses the SAME CRONS_ENABLED_TRUTH_TABLE as the pure-function
-  // tests above (round-6 operator review, item E: "run through BOTH call
-  // sites") — see test/mcp-guide-analysis-auth.spec.ts for the handler
-  // gate's half of this same table.
-  it.each(CRONS_ENABLED_TRUTH_TABLE.filter(([, , expected]) => !expected))(
-    'is a no-op when ENABLE_CRONS is %s',
-    async (_label, value) => {
-      const fakeContainer = makeFakeContainer()
-      const result = await handleScheduled(
-        { cron: '* * * * *' },
-        env({ ENABLE_CRONS: value, CRON_SECRET: 'x' }),
-        fakeContainer
-      )
-      expect(fakeContainer).toHaveBeenCalledTimes(0)
-      expect(result).toEqual({ skipped: true })
-    }
-  )
-
-  it.each(CRONS_ENABLED_TRUTH_TABLE.filter(([, , expected]) => expected))(
-    'calls the container exactly once when ENABLE_CRONS is %s',
-    async (_label, value) => {
-      const fakeContainer = makeFakeContainer()
-      const result = await handleScheduled(
-        { cron: '* * * * *' },
-        env({ ENABLE_CRONS: value, CRON_SECRET: 'test-cron-secret' }),
-        fakeContainer
-      )
-      expect(fakeContainer).toHaveBeenCalledTimes(1)
-      expect(result.skipped).toBe(false)
-    }
-  )
-
-  it.each([
-    ['unset', undefined],
-    ["'0'", '0'],
-    ["'true'", 'true'],
-  ])('stays a no-op with ENABLE_CRONS=%s even when APP_ENV=preview', async (_label, value) => {
-    const fakeContainer = makeFakeContainer()
-    const result = await handleScheduled(
-      { cron: '* * * * *' },
-      env({ APP_ENV: 'preview', ENABLE_CRONS: value, CRON_SECRET: 'x' }),
-      fakeContainer
-    )
-    expect(fakeContainer).toHaveBeenCalledTimes(0)
-    expect(result).toEqual({ skipped: true })
-  })
-
-  it('calls the container exactly once when ENABLE_CRONS is exactly "1"', async () => {
-    const fakeContainer = makeFakeContainer()
-    await handleScheduled(
-      { cron: '* * * * *' },
-      env({ ENABLE_CRONS: '1', CRON_SECRET: 'test-cron-secret' }),
-      fakeContainer
-    )
-    expect(fakeContainer).toHaveBeenCalledTimes(1)
-    const req = fakeContainer.mock.calls[0][0] as Request
-    expect(req.url).toBe('http://container/api/mcp-guide-analysis')
-    expect(req.method).toBe('GET')
-    expect(req.headers.get('authorization')).toBe('Bearer test-cron-secret')
-  })
-
-  it('skips unknown cron expressions even with ENABLE_CRONS=1', async () => {
-    const fakeContainer = makeFakeContainer()
-    const result = await handleScheduled(
-      { cron: '*/5 * * * *' },
-      env({ ENABLE_CRONS: '1', CRON_SECRET: 'x' }),
-      fakeContainer
-    )
-    expect(fakeContainer).toHaveBeenCalledTimes(0)
-    expect(result).toEqual({ skipped: true })
-  })
-
-  it('rejects when ENABLE_CRONS=1 but CRON_SECRET is unset, and makes 0 calls', async () => {
-    const fakeContainer = makeFakeContainer()
-    await expect(
-      handleScheduled({ cron: '* * * * *' }, env({ ENABLE_CRONS: '1' }), fakeContainer)
-    ).rejects.toThrow(/CRON_SECRET not configured/)
-    expect(fakeContainer).toHaveBeenCalledTimes(0)
-  })
-
-  it('rejects when the container responds with a non-2xx status', async () => {
-    const fakeContainer = makeFakeContainer(async () => new Response('nope', { status: 401 }))
-    await expect(
-      handleScheduled({ cron: '* * * * *' }, env({ ENABLE_CRONS: '1', CRON_SECRET: 'x' }), fakeContainer)
-    ).rejects.toThrow(/failed with status 401/)
   })
 })
 
@@ -287,6 +192,37 @@ describe('handleFetch', () => {
   })
 })
 
+describe('static-only Worker entry (src/cf-container-worker.ts)', () => {
+  const offline = { error: 'Service unavailable', detail: 'Advance AI app is offline' }
+
+  it.each(['/api/mcp', '/.well-known/oauth-protected-resource', '/.well-known/oauth-protected-resource/api/mcp'])(
+    '%s gives the offline 503 with security headers and never touches ASSETS',
+    async (path) => {
+      const assetsFetch = vi.fn()
+      const env: WorkerEnv = { ASSETS: { fetch: assetsFetch }, APP_ENV: 'production' }
+      const res = await worker.fetch(new Request(`http://worker.test${path}`, { method: 'POST' }), env)
+      expect(res.status).toBe(503)
+      expect(await res.json()).toEqual(offline)
+      expect(res.headers.get('X-Content-Type-Options')).toBe('nosniff')
+      expect(assetsFetch).not.toHaveBeenCalled()
+    }
+  )
+
+  it('serves SPA routes from ASSETS', async () => {
+    const assetsFetch = vi.fn(
+      async () => new Response('<html>spa</html>', { status: 200, headers: { 'content-type': 'text/html' } })
+    )
+    const env: WorkerEnv = { ASSETS: { fetch: assetsFetch }, APP_ENV: 'production' }
+    const res = await worker.fetch(new Request('http://worker.test/chat/abc'), env)
+    expect(res.status).toBe(200)
+    expect(assetsFetch).toHaveBeenCalledTimes(1)
+  })
+
+  it('has no scheduled() handler', () => {
+    expect((worker as Record<string, unknown>).scheduled).toBeUndefined()
+  })
+})
+
 describe('getContainerEnvVars', () => {
   it('keeps only known string keys', () => {
     const result = getContainerEnvVars({
@@ -372,9 +308,11 @@ describe('wrangler.jsonc', () => {
     expect(wrangler.env.preview.vars.DISABLE_CRONS).toBeUndefined()
   })
 
-  it('env.preview.triggers.crons is explicitly empty (top-level stays live for prod)', () => {
+  // Static-only: `crons: []` (not an omitted `triggers`) so a deploy removes
+  // any previously deployed cron trigger instead of leaving it in place.
+  it('triggers.crons is explicitly empty in both envs', () => {
+    expect(wrangler.triggers.crons).toEqual([])
     expect(wrangler.env.preview.triggers.crons).toEqual([])
-    expect(wrangler.triggers.crons).toEqual(['* * * * *'])
   })
 
   it('env.preview has ACCESS_TEAM_DOMAIN/ACCESS_AUD placeholders, not forwarded to the container', () => {
@@ -389,27 +327,14 @@ describe('wrangler.jsonc', () => {
   it.each([
     ['top level', wrangler],
     ['preview', wrangler.env.preview],
-  ])('%s shares the same containers/assets/migrations shape', (_label, scope: any) => {
-    expect(scope.containers[0].class_name).toBe('AdvanceAiContainer')
-    expect(scope.durable_objects.bindings[0].name).toBe('ADVANCE_AI_CONTAINER')
-    expect(scope.migrations[0].new_sqlite_classes).toEqual(['AdvanceAiContainer'])
+  ])('%s is static-only: no container, v2 deletes the class, assets run worker first', (_label, scope: any) => {
+    expect(scope.containers).toBeUndefined()
+    expect(scope.durable_objects).toBeUndefined()
+    expect(scope.migrations).toEqual([
+      { tag: 'v1', new_sqlite_classes: ['AdvanceAiContainer'] },
+      { tag: 'v2', deleted_classes: ['AdvanceAiContainer'] },
+    ])
     expect(scope.assets.run_worker_first).toBe(true)
     expect(scope.assets.not_found_handling).toBe('single-page-application')
-  })
-
-  it('every top-level cron is a key of CRON_PATHS', () => {
-    for (const cron of wrangler.triggers.crons) {
-      expect(Object.keys(CRON_PATHS)).toContain(cron)
-    }
-  })
-
-  it('every vercel.json cron (schedule + path) is covered by a top-level wrangler cron via CRON_PATHS', () => {
-    const vercel = JSON.parse(readFileSync(resolve(ROOT, 'vercel.json'), 'utf8')) as {
-      crons?: Array<{ path: string; schedule: string }>
-    }
-    for (const { path, schedule } of vercel.crons ?? []) {
-      expect(wrangler.triggers.crons).toContain(schedule)
-      expect(CRON_PATHS[schedule]).toContain(path)
-    }
   })
 })

@@ -9,12 +9,9 @@ import {
 } from './http-rules.mjs'
 import { verifyAccessJwt, type AccessJwtVerifyDeps } from './access-jwt'
 import { isProductionAppEnv } from '../api/lib/app-env'
-import { cronsEnabled } from '../api/lib/crons-enabled'
 
 export interface WorkerEnv {
   ASSETS: { fetch(request: Request): Promise<Response> }
-  CRON_SECRET?: string
-  ENABLE_CRONS?: string
   APP_ENV?: string
   ACCESS_TEAM_DOMAIN?: string
   ACCESS_AUD?: string
@@ -24,10 +21,6 @@ export interface WorkerEnv {
 export type ContainerFetch = (request: Request, env: WorkerEnv) => Promise<Response>
 
 export type HandleFetchDeps = AccessJwtVerifyDeps
-
-export const CRON_PATHS: Record<string, readonly string[]> = {
-  '* * * * *': ['/api/mcp-guide-analysis'],
-}
 
 export function withSecurityHeaders(
   res: Response,
@@ -80,8 +73,7 @@ export async function handleFetch(
   // api/lib/app-env.ts's isProductionAppEnv, so there's only one place that
   // decides what "production" means — never a second parallel string
   // comparison. Production is still completely unaffected: no header
-  // required, no network call. scheduled() never calls this function, so
-  // crons stay governed only by ENABLE_CRONS (see handleScheduled below).
+  // required, no network call.
   if (!isProductionAppEnv({ APP_ENV: env.APP_ENV })) {
     const authorized = await verifyAccessJwt(request, env, deps)
     if (!authorized) {
@@ -109,49 +101,4 @@ export async function handleFetch(
     }
   }
   return withSecurityHeaders(res, pathname, { fromAssets: true })
-}
-
-export async function handleScheduled(
-  controller: { cron: string },
-  env: WorkerEnv,
-  containerFetch: ContainerFetch
-): Promise<{ skipped: boolean; results?: unknown[] }> {
-  const cron = controller.cron
-
-  // Fail closed: only ENABLE_CRONS === '1' runs anything. See
-  // api/lib/crons-enabled.ts for why this isn't a truthy check.
-  if (!cronsEnabled(env)) {
-    console.log(`[cf-cron] skipped (ENABLE_CRONS!=='1') cron=${cron}`)
-    return { skipped: true }
-  }
-
-  const paths = CRON_PATHS[cron]
-  if (!paths) {
-    console.log('[cf-cron] unknown cron expression')
-    return { skipped: true }
-  }
-
-  const secret = String(env.CRON_SECRET ?? '').trim()
-  if (!secret) {
-    throw new Error('CRON_SECRET not configured on Worker')
-  }
-
-  const results: Response[] = []
-  for (const path of paths) {
-    const r = await containerFetch(
-      new Request(`http://container${path}`, {
-        method: 'GET',
-        headers: { Authorization: `Bearer ${secret}` },
-      }),
-      env
-    )
-    await r.arrayBuffer().catch(() => undefined)
-    if (!r.ok) {
-      throw new Error(`Cron ${cron} ${path} failed with status ${r.status}`)
-    }
-    results.push(r)
-  }
-
-  console.log('[cf-cron] ok')
-  return { skipped: false, results }
 }
