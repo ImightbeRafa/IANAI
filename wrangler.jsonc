@@ -1,8 +1,9 @@
 {
-  // Advance AI on Cloudflare Workers + Containers. The Worker serves Static
-  // Assets for everything except /api/* (and the two oauth-protected-resource
-  // rewrites), which it forwards to the AdvanceAiContainer. See
-  // docs/operations/cloudflare-containers.md.
+  // Advance AI on Cloudflare Workers, static-only. The Worker serves Static
+  // Assets for everything; /api/* (and the two oauth-protected-resource
+  // rewrites) get a 503 "Advance AI app is offline" — no container, no crons.
+  // The AdvanceAiContainer class is deleted by migration v2. See
+  // docs/operations/cloudflare-containers.md for the former container setup.
   "name": "advance-ai",
   "main": "src/cf-container-worker.ts",
   "compatibility_date": "2026-09-25",
@@ -27,45 +28,26 @@
     "run_worker_first": true
   },
 
+  // Explicitly empty, not omitted: omitting `triggers` leaves previously
+  // deployed cron triggers in place, while `[]` removes them on deploy.
   "triggers": {
-    "crons": ["* * * * *"]
+    "crons": []
   },
 
-  // Fail closed: no ENABLE_CRONS here means cf/container-env.mjs's
-  // cronsEnabled() is false, so the Worker's scheduled() handler is a no-op
-  // even though this trigger fires every minute. ENABLE_CRONS is set to "1"
-  // (plus a CF-only CRON_SECRET, distinct from Vercel's) only at cutover, in
-  // the same window as removing the Vercel cron — never both live.
   "vars": {
     "APP_ENV": "production"
   },
 
-  "containers": [
-    {
-      "class_name": "AdvanceAiContainer",
-      "image": "./Dockerfile",
-      "instance_type": "standard-2",
-      "max_instances": 2,
-      "image_vars": {
-        "VITE_APP_ENV": "production"
-      }
-    }
-  ],
-
-  "durable_objects": {
-    "bindings": [
-      { "name": "ADVANCE_AI_CONTAINER", "class_name": "AdvanceAiContainer" }
-    ]
-  },
-
+  // v1 stays so the migration history is append-only; v2 deletes the class
+  // (and its Durable Object storage) now that no container is bound.
   "migrations": [
-    { "tag": "v1", "new_sqlite_classes": ["AdvanceAiContainer"] }
+    { "tag": "v1", "new_sqlite_classes": ["AdvanceAiContainer"] },
+    { "tag": "v2", "deleted_classes": ["AdvanceAiContainer"] }
   ],
 
-  // Every block is repeated explicitly for env.preview: vars, durable_objects
-  // and containers do not inherit from the top level, and assets/triggers/
-  // migrations are repeated too so this file doesn't depend on wrangler's
-  // inheritance rules at all.
+  // Every block is repeated explicitly for env.preview: vars do not inherit
+  // from the top level, and assets/triggers/migrations are repeated too so
+  // this file doesn't depend on wrangler's inheritance rules at all.
   "env": {
     "preview": {
       "name": "advance-ai-preview",
@@ -81,16 +63,13 @@
         "run_worker_first": true
       },
 
-      // Explicitly empty, not inherited from the top level: Preview never
-      // fires the cron trigger at all (belt-and-suspenders on top of the
-      // ENABLE_CRONS fail-closed gate — see cf/worker-core.ts).
+      // Explicitly empty, not omitted (see the top-level comment).
       "triggers": {
         "crons": []
       },
 
       // ACCESS_TEAM_DOMAIN / ACCESS_AUD are Worker-only — read by
-      // cf/access-jwt.ts in handleFetch, never forwarded to the container
-      // (see CONTAINER_ENV_KEYS / scripts/parity/env-diff.mjs's
+      // cf/access-jwt.ts in handleFetch (see scripts/parity/env-diff.mjs's
       // WORKER_ONLY_VAR_NAMES). Non-secret placeholders; the real values
       // come with the Access application once it exists. A value
       // containing "REPLACE" is treated as unconfigured (fails closed, no
@@ -101,26 +80,9 @@
         "ACCESS_AUD": "REPLACE_WITH_ACCESS_APP_AUD"
       },
 
-      "containers": [
-        {
-          "class_name": "AdvanceAiContainer",
-          "image": "./Dockerfile",
-          "instance_type": "standard-2",
-          "max_instances": 2,
-          "image_vars": {
-            "VITE_APP_ENV": "preview"
-          }
-        }
-      ],
-
-      "durable_objects": {
-        "bindings": [
-          { "name": "ADVANCE_AI_CONTAINER", "class_name": "AdvanceAiContainer" }
-        ]
-      },
-
       "migrations": [
-        { "tag": "v1", "new_sqlite_classes": ["AdvanceAiContainer"] }
+        { "tag": "v1", "new_sqlite_classes": ["AdvanceAiContainer"] },
+        { "tag": "v2", "deleted_classes": ["AdvanceAiContainer"] }
       ]
     }
   }

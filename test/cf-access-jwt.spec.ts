@@ -1,7 +1,7 @@
 import { webcrypto } from 'node:crypto'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { ACCESS_ALLOWED_EMAILS, verifyAccessJwt, __resetJwksCacheForTests } from '../cf/access-jwt'
-import { handleFetch, handleScheduled, type WorkerEnv } from '../cf/worker-core'
+import { handleFetch, type WorkerEnv } from '../cf/worker-core'
 
 const subtle = webcrypto.subtle as unknown as SubtleCrypto
 
@@ -520,16 +520,5 @@ describe('handleFetch Access JWT gate (preview only)', () => {
         expect(fetchImpl).not.toHaveBeenCalled()
       }
     )
-  })
-
-  it('scheduled() with APP_ENV=preview is unaffected by JWT logic — governed only by ENABLE_CRONS', async () => {
-    const containerFetch = vi.fn(async () => new Response('{"ok":true}', { status: 200 }))
-    const result = await handleScheduled(
-      { cron: '* * * * *' },
-      { ASSETS: { fetch: vi.fn() }, APP_ENV: 'preview', ENABLE_CRONS: '1', CRON_SECRET: 'x' } as WorkerEnv,
-      containerFetch
-    )
-    expect(result.skipped).toBe(false)
-    expect(containerFetch).toHaveBeenCalledTimes(1)
   })
 })
